@@ -1637,10 +1637,24 @@ function showAuthGate() {
         Sign in with Google
       </button>
       <p style="font-family:Sarabun;font-size:12px;color:#334155;text-align:center;line-height:1.6">
-        สำหรับทีม TEAM·CM เท่านั้น<br/>ระบบจะบันทึกข้อมูลลง Firebase โดยอัตโนมัติ
+        🔒 เฉพาะ <strong style="color:#94a3b8">@teamcm.co.th</strong> เท่านั้น<br/>
+        ข้อมูลทั้งหมดบันทึกลง Firebase อัตโนมัติ
       </p>
     </div>`;
   document.body.appendChild(gate);
+}
+
+// ===== Access control =====
+// Restrict app to TEAM·CM domain only. Edit these lists to manage access.
+const ALLOWED_DOMAINS = ['teamcm.co.th'];
+const ADMIN_EMAILS    = ['nitid.korit@gmail.com']; // temporary admin override
+
+function isAllowedEmail(email) {
+  if (!email) return false;
+  const e = email.toLowerCase().trim();
+  if (ADMIN_EMAILS.map(x => x.toLowerCase()).includes(e)) return true;
+  const domain = e.split('@')[1] || '';
+  return ALLOWED_DOMAINS.includes(domain);
 }
 
 async function handleAuthStateChange(firebaseUser) {
@@ -1649,6 +1663,18 @@ async function handleAuthStateChange(firebaseUser) {
     showAuthGate();
     return;
   }
+
+  // ─── Domain check — reject unauthorized emails ───
+  if (!isAllowedEmail(firebaseUser.email)) {
+    const blockedEmail = firebaseUser.email;
+    try { await fbAuth.signOut(); } catch (e) {}
+    showAuthGate();
+    setTimeout(() => {
+      toast(`🚫 ${blockedEmail} ไม่ได้รับอนุญาต — ใช้ได้เฉพาะ @${ALLOWED_DOMAINS[0]}`, '#dc2626');
+    }, 400);
+    return;
+  }
+
   // Hide auth gate
   if (gate) gate.style.display = 'none';
 
