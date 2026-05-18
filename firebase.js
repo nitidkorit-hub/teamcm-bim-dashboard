@@ -81,6 +81,36 @@ async function fbAddAudit(projIdx, entry) {
   return fbDb.ref(`audit/${fbPid(projIdx)}`).push({ ...entry, _ts: Date.now() });
 }
 
+// ─── Projects (Realtime Database) ────────────────────────────────────
+/** Load projects array. Returns null if not seeded yet. */
+async function fbLoadProjects() {
+  const snap = await fbDb.ref('projects').get();
+  if (!snap.exists()) return null;
+  const data = snap.val();
+  // RTDB stores as object with numeric keys → array sorted by id
+  return Object.values(data).sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
+}
+
+/** Save the entire PROJECTS array. Used after any project mutation. */
+async function fbSaveProjects(projects) {
+  const data = {};
+  projects.forEach((p, idx) => { data[idx] = p; });
+  return fbDb.ref('projects').set(data);
+}
+
+// ─── Users (Realtime Database) ───────────────────────────────────────
+async function fbLoadUsers() {
+  const snap = await fbDb.ref('users').get();
+  if (!snap.exists()) return null;
+  return Object.values(snap.val()).sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
+}
+
+async function fbSaveUsers(users) {
+  const data = {};
+  users.forEach(u => { data[String(u.id)] = u; });
+  return fbDb.ref('users').set(data);
+}
+
 // ─── Storage stubs (images stored in localStorage, not Firebase) ──────
 // Returns rejected promise so callers' .catch() runs without side-effects
 async function fbUploadDataUrl() { throw new Error('Storage not enabled'); }

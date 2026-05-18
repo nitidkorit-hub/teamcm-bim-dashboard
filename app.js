@@ -1663,7 +1663,29 @@ async function handleAuthStateChange(firebaseUser) {
     lastActive: 'just now'
   };
 
-  // Load project data from Firestore
+  // Load PROJECTS + USERS from Firebase (or seed from data.js on first run)
+  try {
+    const cloudProjects = await fbLoadProjects();
+    if (cloudProjects && cloudProjects.length > 0) {
+      PROJECTS.length = 0;
+      cloudProjects.forEach(p => PROJECTS.push(p));
+    } else {
+      await fbSaveProjects(PROJECTS);   // first run → seed
+    }
+    if (state.projIdx >= PROJECTS.length) state.projIdx = 0;
+
+    const cloudUsers = await fbLoadUsers();
+    if (cloudUsers && cloudUsers.length > 0) {
+      USERS.length = 0;
+      cloudUsers.forEach(u => USERS.push(u));
+    } else {
+      await fbSaveUsers(USERS);          // first run → seed
+    }
+  } catch (e) {
+    console.warn('Cloud sync (projects/users):', e);
+  }
+
+  // Load project data from Firebase
   await loadProjectData(state.projIdx);
 }
 
@@ -2547,6 +2569,9 @@ function saveNewProject() {
     action: 'Project Created', field:'', oldVal:'', newVal: code,
     user: state.user.name
   });
+  // Sync to Firebase
+  fbSaveProjects(PROJECTS).catch(e => console.warn('Firebase projects:', e));
+  fbAddAudit(state.projIdx, getAud()[0]).catch(() => {});
   closeModal();
   toast(`✓ Created project ${name}`, '#2DBE60');
   render();
@@ -2601,7 +2626,10 @@ function saveEditProject(i) {
       action: 'Project Status Change', field:'status',
       oldVal: oldStatus, newVal: p.status, user: state.user.name
     });
+    fbAddAudit(state.projIdx, getAud()[0]).catch(() => {});
   }
+  // Sync to Firebase
+  fbSaveProjects(PROJECTS).catch(e => console.warn('Firebase projects:', e));
   closeModal();
   toast(`✓ Updated ${p.name}`, '#2DBE60');
   render();
@@ -2636,6 +2664,10 @@ function confirmDeleteProject(i) {
   else if (state.projIdx > i) state.projIdx -= 1;
   state.selected.clear();
   state.notifications = [];
+  // Sync to Firebase: full projects array + remove RTDB nodes for deleted project
+  fbSaveProjects(PROJECTS).catch(e => console.warn('Firebase projects:', e));
+  fbDb.ref(`issues/${p.code.replace(/[.$#[\]/]/g, '_')}`).remove().catch(() => {});
+  fbDb.ref(`audit/${p.code.replace(/[.$#[\]/]/g, '_')}`).remove().catch(() => {});
   toast(`🗑 Deleted ${p.name}`, '#dc2626');
   render();
 }
@@ -2691,6 +2723,9 @@ function duplicateProject(i) {
     issueNo:'', issueTitle: `Duplicated from ${p.name}`,
     action: 'Project Created', field:'', oldVal:'', newVal: dup.code, user: state.user.name
   }];
+  // Sync to Firebase: projects + duplicated issues
+  fbSaveProjects(PROJECTS).catch(e => console.warn('Firebase projects:', e));
+  fbSeedIssues(newId, PROJECT_ISSUES[newId]).catch(e => console.warn('Firebase seed:', e));
   toast(`✓ Duplicated ${p.name}`, '#2DBE60');
   render();
 }
@@ -2738,6 +2773,7 @@ function saveInviteUser() {
     role: $('#iu-role').value,
     lastActive: 'invited'
   });
+  fbSaveUsers(USERS).catch(e => console.warn('Firebase users:', e));
   closeModal();
   toast(`✓ Invitation sent to ${email}`, '#2DBE60');
   render();
@@ -2798,6 +2834,7 @@ function saveUserEdit(id) {
     });
     fbAddAudit(state.projIdx, getAud()[0]).catch(() => {});
   }
+  fbSaveUsers(USERS).catch(e => console.warn('Firebase users:', e));
   closeModal();
   toast(`✓ อัปเดต ${name} → ${role}`, '#2DBE60');
   render();
@@ -2809,6 +2846,7 @@ function confirmDeleteUser(id) {
   if (!confirm(`ลบผู้ใช้ "${u.name}" ?\nการกระทำนี้ย้อนกลับไม่ได้`)) return;
   const idx = USERS.findIndex(x => x.id === id);
   if (idx >= 0) USERS.splice(idx, 1);
+  fbSaveUsers(USERS).catch(e => console.warn('Firebase users:', e));
   closeModal();
   toast(`🗑 ลบ ${u.name}`, '#dc2626');
   render();
