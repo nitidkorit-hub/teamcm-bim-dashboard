@@ -24,10 +24,9 @@ const googleProvider = new firebase.auth.GoogleAuthProvider();
 
 const microsoftProvider = new firebase.auth.OAuthProvider('microsoft.com');
 microsoftProvider.setCustomParameters({
-  // 'common' lets any Microsoft account sign in; the app-level domain check
-  // in app.js then restricts to @teamcm.co.th. Replace with your tenant GUID
-  // (or 'teamcm.co.th') to tighten the OAuth flow itself.
-  tenant: 'common',
+  // TEAM·CM Azure tenant — only @teamcm.co.th accounts can authenticate
+  // via the OAuth flow itself (in addition to the app-level domain check).
+  tenant: 'e13fef33-a530-4c08-b4d5-2e4711280b4d',
   prompt: 'select_account'
 });
 // Request email + profile scopes
