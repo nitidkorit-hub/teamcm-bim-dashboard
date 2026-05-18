@@ -953,7 +953,7 @@ function renderUsers() {
         <div class="muted mono" style="font-size:12px">${esc(u.email)}</div>
         <div><span class="badge ${roleColors[u.role]}">${u.role}</span></div>
         <div class="muted mono" style="font-size:11.5px">${esc(u.lastActive)}</div>
-        <div><button class="t-row-btn">${I.more}</button></div>
+        <div><button class="t-row-btn" onclick="openEditUser(${u.id})" title="Edit user">${I.edit}</button></div>
       </div>`).join('')}
     </div>
     <div class="card" style="margin-top:14px">
@@ -1983,9 +1983,138 @@ async function fetchImageAsDataURL(url) {
   });
 }
 
-function handleCsvFile(e) {
-  const file = e.target.files && e.target.files[0];
-  if (!file) return;
+// ===== ZIP / multi-file image import helpers =====
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => resolve(e.target.result);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
+// Index a single image into imgMap with multiple lookup keys
+function addToImgMap(imgMap, filename, dataUrl) {
+  const name = filename.split('/').pop().split('\\').pop();
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  if (!['png','jpg','jpeg','gif','webp','bmp','svg'].includes(ext)) return;
+  // Pattern "1_..." → key "1" (leading running number)
+  const m1 = name.match(/^(\d+)[_\-]/);
+  if (m1) imgMap[m1[1]] = dataUrl;
+  // Pattern "1_134_..." → key "134" (issue NO. after running number)
+  const m2 = name.match(/^\d+[_\-](\d+)[_\-]/);
+  if (m2) imgMap[m2[1]] = dataUrl;
+  // Filename without extension
+  const noExt = name.replace(/\.\w+$/, '');
+  imgMap[noExt] = dataUrl;
+  // Full filename
+  imgMap[name] = dataUrl;
+}
+
+// Extract images from a ZIP ArrayBuffer using JSZip
+async function extractZipToImgMap(arrayBuffer, imgMap) {
+  if (typeof JSZip === 'undefined') {
+    toast('⚠️ JSZip ยังไม่โหลด — ลอง reload เว็บ', '#d97706');
+    return 0;
+  }
+  let added = 0;
+  try {
+    const zip = await JSZip.loadAsync(arrayBuffer);
+    const promises = [];
+    zip.forEach((path, entry) => {
+      if (entry.dir) return;
+      const name = path.split('/').pop().split('\\').pop();
+      const ext = (name.split('.').pop() || '').toLowerCase();
+      if (!['png','jpg','jpeg','gif','webp'].includes(ext)) return;
+      promises.push(entry.async('base64').then(b64 => {
+        const mimeMap = { png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/gif', webp:'image/webp' };
+        const mime = mimeMap[ext] || 'image/png';
+        addToImgMap(imgMap, name, `data:${mime};base64,${b64}`);
+        added++;
+      }));
+    });
+    await Promise.all(promises);
+  } catch (e) {
+    console.error('ZIP extract:', e);
+    toast(`⚠️ ZIP error: ${e.message}`, '#d97706');
+  }
+  return added;
+}
+
+// Find best image match for an issue using imgMap (by NO. / title / hyperlink)
+function findImageForIssue(imgMap, issue) {
+  if (!imgMap || Object.keys(imgMap).length === 0) return null;
+  // 1) direct match by issue NO.
+  if (imgMap[issue.no]) return imgMap[issue.no];
+  // 2) leading number in title (e.g. "134_20260401_..." → "134")
+  if (issue.title) {
+    const tm = issue.title.match(/^(\d+)[_\-]/);
+    if (tm && imgMap[tm[1]]) return imgMap[tm[1]];
+  }
+  // 3) parse imageUrl field if HYPERLINK("path\file.png","label")
+  if (issue.imageUrl) {
+    const hm = issue.imageUrl.match(/HYPERLINK\(["']([^"']+)/i);
+    if (hm) {
+      const fn = hm[1].replace(/\\/g, '/').split('/').pop();
+      if (imgMap[fn]) return imgMap[fn];
+      const noExt = fn.replace(/\.\w+$/, '');
+      if (imgMap[noExt]) return imgMap[noExt];
+      const m1 = fn.match(/^(\d+)[_\-]/);
+      if (m1 && imgMap[m1[1]]) return imgMap[m1[1]];
+      const m2 = fn.match(/^\d+[_\-](\d+)[_\-]/);
+      if (m2 && imgMap[m2[1]]) return imgMap[m2[1]];
+    }
+    // Or just a plain filename / URL
+    if (imgMap[issue.imageUrl]) return imgMap[issue.imageUrl];
+  }
+  return null;
+}
+
+async function handleCsvFile(e) {
+  const files = e.target.files;
+  if (!files || files.length === 0) return;
+
+  // Separate files by type
+  const csvFiles = [], zipFiles = [], imageFiles = [];
+  for (const f of files) {
+    const n = f.name.toLowerCase();
+    if (n.endsWith('.csv')) csvFiles.push(f);
+    else if (n.endsWith('.zip')) zipFiles.push(f);
+    else if (f.type.startsWith('image/')) imageFiles.push(f);
+  }
+
+  // Build image map from all uploaded ZIPs / images
+  const imgMap = {};
+  if (zipFiles.length || imageFiles.length) {
+    toast(`📦 กำลังโหลด ${zipFiles.length} ZIP + ${imageFiles.length} รูป…`, '#3A6EA5');
+    for (const f of imageFiles) {
+      try { addToImgMap(imgMap, f.name, await fileToDataUrl(f)); } catch (err) { console.warn(err); }
+    }
+    for (const f of zipFiles) {
+      try { await extractZipToImgMap(await f.arrayBuffer(), imgMap); } catch (err) { console.warn(err); }
+    }
+    toast(`✓ Loaded ${Object.keys(imgMap).length} image keys`, '#2DBE60');
+  }
+
+  // No CSV → just match images to existing issues
+  if (csvFiles.length === 0) {
+    if (Object.keys(imgMap).length === 0) {
+      toast('⚠️ ไม่พบไฟล์ที่รองรับ', '#d97706');
+      return;
+    }
+    let matched = 0;
+    getIss().forEach(it => {
+      const img = findImageForIssue(imgMap, it);
+      if (img) { setImg(it.no, img); matched++; }
+    });
+    persistImgs();
+    toast(`✓ จับคู่รูปกับ ${matched} issues`, matched > 0 ? '#2DBE60' : '#d97706');
+    render();
+    return;
+  }
+
+  // Process first CSV file with imgMap available
+  const file = csvFiles[0];
   const reader = new FileReader();
   reader.onload = async ev => {
     const text = ev.target.result;
@@ -2051,7 +2180,16 @@ function handleCsvFile(e) {
       importedCount++;
 
       const imgUrl = get(row, col.imageUrl);
-      if (imgUrl) imageQueue.push({ no, url: imgUrl });
+      if (imgUrl) issue.imageUrl = imgUrl;
+
+      // Try matching from uploaded ZIP/image map first
+      const localImg = findImageForIssue(imgMap, issue);
+      if (localImg) {
+        setImg(no, localImg);
+      } else if (imgUrl && /^https?:\/\//i.test(imgUrl)) {
+        // Only queue HTTP URLs for async fetch — skip Excel HYPERLINK formulas
+        imageQueue.push({ no, url: imgUrl });
+      }
     }
 
     // Prepend new issues (reverse so order matches CSV top-to-bottom)
@@ -2065,13 +2203,18 @@ function handleCsvFile(e) {
     });
 
     state.notifications = [];
-    toast('✓ Import ' + importedCount + ' issues จาก ' + file.name + (imageQueue.length ? ' · กำลังโหลด ' + imageQueue.length + ' รูป…' : ''), '#2DBE60');
-    // Sync all imported issues to Firestore in one batch
-    fbSeedIssues(state.projIdx, getIss()).catch(e => console.warn('Firestore seed:', e));
+    // persist any images matched from uploaded ZIP/images
+    const localImgCount = Object.keys(imgMap).length > 0
+      ? getIss().filter(it => getImg(it.no)).length
+      : 0;
+    if (localImgCount > 0) persistImgs();
+    toast(`✓ Import ${importedCount} issues${localImgCount ? ` · จับคู่รูป ${localImgCount}` : ''}${imageQueue.length ? ` · โหลดเพิ่ม ${imageQueue.length} รูป…` : ''}`, '#2DBE60');
+    // Sync all imported issues to RTDB in one batch
+    fbSeedIssues(state.projIdx, getIss()).catch(e => console.warn('Firebase seed:', e));
     fbAddAudit(state.projIdx, getAud()[0]).catch(() => {});
     render();
 
-    // Fetch images from hyperlinks in CSV, then upload to Firebase Storage
+    // Fetch images from HTTP URLs in CSV (only those not matched locally)
     if (imageQueue.length > 0) {
       let imageCount = 0, failedImages = 0;
       for (const item of imageQueue) {
@@ -2590,13 +2733,84 @@ function saveInviteUser() {
   const email = $('#iu-email').value.trim();
   if (!name || !email) { toast('⚠️ ใส่ name + email ก่อน', '#d97706'); return; }
   USERS.push({
-    id: USERS.length + 1,
+    id: (USERS.reduce((m, u) => Math.max(m, u.id), 0) || 0) + 1,
     name, email,
     role: $('#iu-role').value,
     lastActive: 'invited'
   });
   closeModal();
   toast(`✓ Invitation sent to ${email}`, '#2DBE60');
+  render();
+}
+
+// ============== Edit / Delete User ==============
+function openEditUser(id) {
+  const u = USERS.find(x => x.id === id);
+  if (!u) return;
+  const roleColors = { 'Admin':'b-critical', 'BIM Manager':'b-new', 'Coordinator':'b-active', 'Viewer':'b-unknown' };
+  openModal(`
+    <div class="modal">
+      <div class="modal-h"><h3>Edit User</h3><button class="so-close" onclick="closeModal()">${I.close}</button></div>
+      <div class="modal-b">
+        <div style="display:flex;align-items:center;gap:12px;padding:4px 0 14px;border-bottom:1px solid var(--border-2);margin-bottom:14px">
+          <div class="user-avatar" style="width:48px;height:48px;font-size:15px">${u.name.split(' ').map(n=>n[0]).join('').slice(0,2)}</div>
+          <div style="flex:1">
+            <div style="font-weight:700;font-size:15px;font-family:Montserrat">${esc(u.name)}</div>
+            <div style="font-size:12px;color:var(--muted)" class="mono">${esc(u.email)}</div>
+            <div style="margin-top:4px"><span class="badge ${roleColors[u.role] || 'b-unknown'}">${esc(u.role)}</span></div>
+          </div>
+        </div>
+        <div class="form-row"><label>Full Name *</label><input type="text" id="eu-name" value="${esc(u.name)}" /></div>
+        <div class="form-row"><label>Email *</label><input type="text" id="eu-email" value="${esc(u.email)}" /></div>
+        <div class="form-row"><label>Role *</label>
+          <select id="eu-role">
+            ${['Viewer','Coordinator','BIM Manager','Admin'].map(r => `<option ${u.role === r ? 'selected' : ''}>${r}</option>`).join('')}
+          </select>
+        </div>
+        <div style="font-size:11.5px;color:var(--muted);margin-top:4px">การเปลี่ยน role จะมีผลทันทีเมื่อบันทึก</div>
+      </div>
+      <div class="modal-f" style="display:flex;justify-content:space-between;align-items:center">
+        <button class="btn btn-d" onclick="confirmDeleteUser(${u.id})" style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca">${I.close}<span>Delete</span></button>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-g" onclick="closeModal()">Cancel</button>
+          <button class="btn btn-p" onclick="saveUserEdit(${u.id})">${I.check2}<span>Save Changes</span></button>
+        </div>
+      </div>
+    </div>`);
+}
+
+function saveUserEdit(id) {
+  const u = USERS.find(x => x.id === id);
+  if (!u) return;
+  const name  = $('#eu-name').value.trim();
+  const email = $('#eu-email').value.trim();
+  const role  = $('#eu-role').value;
+  if (!name || !email) { toast('⚠️ Name + Email ห้ามว่าง', '#d97706'); return; }
+  const oldRole = u.role;
+  u.name = name; u.email = email; u.role = role;
+  // Audit log entry
+  if (oldRole !== role) {
+    getAud().unshift({
+      ts: new Date().toLocaleDateString('en-GB').replace(/\//g,'/').slice(0,8) + ' ' + new Date().toTimeString().slice(0,5),
+      issueNo:'', issueTitle: u.name,
+      action:'Role Changed', field:'role', oldVal: oldRole, newVal: role,
+      user: state.user.name
+    });
+    fbAddAudit(state.projIdx, getAud()[0]).catch(() => {});
+  }
+  closeModal();
+  toast(`✓ อัปเดต ${name} → ${role}`, '#2DBE60');
+  render();
+}
+
+function confirmDeleteUser(id) {
+  const u = USERS.find(x => x.id === id);
+  if (!u) return;
+  if (!confirm(`ลบผู้ใช้ "${u.name}" ?\nการกระทำนี้ย้อนกลับไม่ได้`)) return;
+  const idx = USERS.findIndex(x => x.id === id);
+  if (idx >= 0) USERS.splice(idx, 1);
+  closeModal();
+  toast(`🗑 ลบ ${u.name}`, '#dc2626');
   render();
 }
 
@@ -2877,6 +3091,7 @@ Object.assign(window, {
   triggerImportCSV, exportData, exportIssuesCSV, exportSelected, exportAuditLog, exportAnalytics,
   openNewIssue, saveNewIssue, openEditIssue, saveEditIssue, markResolved, confirmDeleteIssue,
   openNewProject, saveNewProject, openInviteUser, saveInviteUser, openUserMenu,
+  openEditUser, saveUserEdit, confirmDeleteUser,
   openAdvancedFilter, applyAdvancedFilter, resetFilters,
   closeModal,
   toggleNotif, readNotif, markAllRead,

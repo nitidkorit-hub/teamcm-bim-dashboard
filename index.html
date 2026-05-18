@@ -23,7 +23,7 @@
   <div id="modal-host" class="mb" aria-hidden="true"></div>
 
   <!-- Hidden file inputs -->
-  <input id="csv-input" type="file" accept=".csv,text/csv" class="hide" />
+  <input id="csv-input" type="file" accept=".csv,.zip,image/*" multiple class="hide" />
   <input id="img-input" type="file" accept="image/*" class="hide" />
 
   <!-- Command palette -->
@@ -37,6 +37,9 @@
       <div id="cmdk-list" class="cmdk-list"></div>
     </div>
   </div>
+
+  <!-- JSZip for extracting images from ZIP uploads -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
   <!-- Firebase compat SDK v12 (Auth + Realtime Database — Spark plan) -->
   <script src="https://www.gstatic.com/firebasejs/12.13.0/firebase-app-compat.js"></script>

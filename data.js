@@ -4,9 +4,8 @@
    - EE:69, AC:19, AR:17, SN:15, FP:15, ST:7, LA:2, IN:1 (=145)
 */
 const PROJECTS = [
-  { id: 0, name: 'Ananda S38', code: 'BIM-2026-04', desc: 'Coordination issues — Apr 2026 (IFC50)', active: true, phase: 'IFC50', status: 'Active' },
-  { id: 1, name: 'Whizdom Asoke', code: 'BIM-2026-03', desc: 'Mar 2026 coordination round', active: false, phase: 'IFC42', status: 'On Hold' },
-  { id: 2, name: 'Park Origin Phayathai', code: 'BIM-2026-02', desc: 'Feb 2026 schematic clash review', active: false, phase: 'SD06', status: 'Active' }
+  { id: 0, name: 'Sample Project A', code: 'DEMO-SAMPLE-A', desc: 'ตัวอย่างโปรเจค — สร้างโปรเจคของคุณเอง', active: true, phase: 'IFC50', status: 'Active' },
+  { id: 1, name: 'Sample Project B', code: 'DEMO-SAMPLE-B', desc: 'ตัวอย่างที่ 2 — Import CSV ของคุณได้เลย', active: false, phase: 'IFC42', status: 'On Hold' }
 ];
 
 const USERS = [
@@ -110,7 +109,7 @@ const statusBag  = JSON.parse(JSON.stringify(STATUS_DIST));
 const prioBag    = JSON.parse(JSON.stringify(PRIO_DIST));
 
 const ISSUES = [];
-const PROJECT_ISSUES = { 0: ISSUES, 1: [], 2: [] };
+const PROJECT_ISSUES = { 0: ISSUES, 1: [] };
 const TOTAL = 145;
 
 // Grid letters for titles
@@ -205,21 +204,16 @@ function generateProjectIssues(seed, total, statusMix, prioMix, distMix) {
   return issues;
 }
 
-// Project 1: Whizdom Asoke — 78 issues, more resolved (older project)
+// Project 1: 5 sample issues
 PROJECT_ISSUES[1] = generateProjectIssues(
-  20260330, 78,
-  { RESOLVED:42, ACTIVE:21, NEW:10, Unknown:5 },
-  { Critical:8, Major:38, Minor:32 },
-  { EE:32, AC:12, AR:11, SN:8, FP:8, ST:5, LA:1, IN:1 }
+  20260330, 5,
+  { RESOLVED:2, ACTIVE:2, NEW:1, Unknown:0 },
+  { Critical:1, Major:2, Minor:2 },
+  { EE:2, AC:1, AR:1, SN:0, FP:1, ST:0, LA:0, IN:0 }
 );
 
-// Project 2: Park Origin Phayathai — 38 issues, mostly new (early stage)
-PROJECT_ISSUES[2] = generateProjectIssues(
-  20260228, 38,
-  { RESOLVED:8, ACTIVE:14, NEW:13, Unknown:3 },
-  { Critical:6, Major:18, Minor:14 },
-  { EE:14, AC:6, AR:8, SN:4, FP:3, ST:2, LA:1, IN:0 }
-);
+// Reduce Project 0 (Sample Project A) — keep only first 8 as demo
+PROJECT_ISSUES[0] = PROJECT_ISSUES[0].slice(0, 8);
 
 function daysAgo(d) {
   const t = new Date('2026-04-29T10:00:00');
@@ -266,9 +260,9 @@ const AUDIT_LOG = [
   { ts:'29/04/26 08:42', issueNo:'',    issueTitle:'BIM_Report_20260429.csv',           action:'CSV Import',     field:'',         oldVal:'',        newVal:'145 rows',   user:'Pasit Charoenpong' }
 ];
 
-// Per-project audit logs
-const PROJECT_AUDIT = { 0: AUDIT_LOG, 1: [], 2: [] };
-[1, 2].forEach(pIdx => {
+// Per-project audit logs (minimal demo)
+const PROJECT_AUDIT = { 0: AUDIT_LOG.slice(0, 5), 1: [] };
+[1].forEach(pIdx => {
   const sample = PROJECT_ISSUES[pIdx].slice(0, 6);
   sample.forEach((it, i) => {
     PROJECT_AUDIT[pIdx].push({
