@@ -1,0 +1,7 @@
+﻿design_archive/
+.claude/
+server.log
+server.py
+node_modules/
+.env
+*.local

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=1440" />
+<title>TEAM·CM BIM Coordination Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@500;600;700;800&family=Sarabun:wght@300;400;500;600;700&family=Prompt:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app"></div>
+
+  <!-- Issue detail slide-over -->
+  <div id="so-backdrop" class="so-backdrop"></div>
+  <aside id="so" class="so" aria-hidden="true"></aside>
+
+  <!-- Toast -->
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <!-- Modal host -->
+  <div id="modal-host" class="mb" aria-hidden="true"></div>
+
+  <!-- Hidden file inputs -->
+  <input id="csv-input" type="file" accept=".csv,text/csv" class="hide" />
+  <input id="img-input" type="file" accept="image/*" class="hide" />
+
+  <!-- Command palette -->
+  <div id="cmdk" class="cmdk-wrap" aria-hidden="true">
+    <div class="cmdk">
+      <div class="cmdk-input">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+        <input id="cmdk-q" placeholder="ค้นหา Issues, Pages, คำสั่ง…" />
+        <kbd>esc</kbd>
+      </div>
+      <div id="cmdk-list" class="cmdk-list"></div>
+    </div>
+  </div>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
