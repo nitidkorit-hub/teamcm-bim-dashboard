@@ -1,6 +1,7 @@
 /* =============================================================
    TEAMCM BIM Dashboard — Firebase Integration Layer
-   Firebase compat SDK v12  (scripts loaded in dashboard.html)
+   Uses: Auth + Realtime Database (Spark plan, no billing needed)
+   Images: localStorage only (base64)
    ============================================================= */
 
 const firebaseConfig = {
@@ -15,9 +16,8 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 
-const fbAuth    = firebase.auth();
-const fbDb      = firebase.firestore();
-const fbStorage = firebase.storage();
+const fbAuth = firebase.auth();
+const fbDb   = firebase.database();
 const googleProvider = new firebase.auth.GoogleAuthProvider();
 
 // ─── Auth ────────────────────────────────────────────────────────────
@@ -28,98 +28,61 @@ function fbSignOut() {
   return fbAuth.signOut().then(() => location.reload());
 }
 
-// ─── Project document ID ─────────────────────────────────────────────
-// Uses project code as Firestore doc ID, e.g. 'BIM-2026-04'
+// ─── Project key (safe for RTDB path) ────────────────────────────────
+// Replaces '.' with '_' — RTDB keys cannot contain . $ # [ ] /
 function fbPid(projIdx) {
-  return (PROJECTS[projIdx] || PROJECTS[0]).code;
+  return ((PROJECTS[projIdx] || PROJECTS[0]).code).replace(/[.$#[\]/]/g, '_');
 }
 
-// ─── Issues ──────────────────────────────────────────────────────────
+// ─── Issues (Realtime Database) ───────────────────────────────────────
 /**
  * Load all issues for a project.
- * Returns null if the collection is empty (first time → need seeding).
+ * Returns null if no data exists (first run → need seeding).
  */
 async function fbLoadIssues(projIdx) {
-  const snap = await fbDb
-    .collection('issues').doc(fbPid(projIdx))
-    .collection('items').orderBy('no').get();
-  if (snap.empty) return null;
-  return snap.docs.map(d => d.data());
+  const snap = await fbDb.ref(`issues/${fbPid(projIdx)}`).get();
+  if (!snap.exists()) return null;
+  const data = snap.val();
+  // Sort by issue number numerically
+  return Object.values(data).sort((a, b) => parseInt(a.no) - parseInt(b.no));
 }
 
 /** Save (upsert) a single issue. Fire-and-forget safe. */
 async function fbSaveIssue(projIdx, issue) {
-  return fbDb
-    .collection('issues').doc(fbPid(projIdx))
-    .collection('items').doc(String(issue.no))
-    .set(issue, { merge: true });
+  const key = String(issue.no).replace(/[.$#[\]/]/g, '_');
+  return fbDb.ref(`issues/${fbPid(projIdx)}/${key}`).set(issue);
 }
 
 /** Delete a single issue. Fire-and-forget safe. */
 async function fbDeleteIssue(projIdx, no) {
-  return fbDb
-    .collection('issues').doc(fbPid(projIdx))
-    .collection('items').doc(String(no)).delete();
+  const key = String(no).replace(/[.$#[\]/]/g, '_');
+  return fbDb.ref(`issues/${fbPid(projIdx)}/${key}`).remove();
 }
 
-/** Bulk-write issues (seed or full replace). Splits into 400-write batches. */
+/** Bulk-write all issues for a project (seed / full replace). */
 async function fbSeedIssues(projIdx, issues) {
-  for (let i = 0; i < issues.length; i += 400) {
-    const batch = fbDb.batch();
-    issues.slice(i, i + 400).forEach(iss => {
-      const ref = fbDb
-        .collection('issues').doc(fbPid(projIdx))
-        .collection('items').doc(String(iss.no));
-      batch.set(ref, iss);
-    });
-    await batch.commit();
-  }
+  const data = {};
+  issues.forEach(iss => {
+    const key = String(iss.no).replace(/[.$#[\]/]/g, '_');
+    data[key] = iss;
+  });
+  return fbDb.ref(`issues/${fbPid(projIdx)}`).set(data);
 }
 
-// ─── Audit Log ───────────────────────────────────────────────────────
+// ─── Audit Log (Realtime Database) ───────────────────────────────────
 async function fbLoadAudit(projIdx) {
-  const snap = await fbDb
-    .collection('audit').doc(fbPid(projIdx))
-    .collection('logs').orderBy('_ts', 'desc').limit(100).get();
-  return snap.docs.map(d => {
-    const row = d.data();
-    delete row._ts;   // remove server timestamp before returning
-    return row;
-  });
+  const snap = await fbDb.ref(`audit/${fbPid(projIdx)}`).orderByChild('_ts').limitToLast(100).get();
+  if (!snap.exists()) return [];
+  const rows = Object.values(snap.val()).reverse();
+  return rows.map(r => { const x = { ...r }; delete x._ts; return x; });
 }
 
 async function fbAddAudit(projIdx, entry) {
-  return fbDb
-    .collection('audit').doc(fbPid(projIdx))
-    .collection('logs').add({
-      ...entry,
-      _ts: firebase.firestore.FieldValue.serverTimestamp()
-    });
+  return fbDb.ref(`audit/${fbPid(projIdx)}`).push({ ...entry, _ts: Date.now() });
 }
 
-// ─── Storage (images) ────────────────────────────────────────────────
-/**
- * Upload a base64 data URL → Firebase Storage.
- * Returns the permanent download URL.
- */
-async function fbUploadDataUrl(projIdx, no, dataUrl) {
-  const blob = await (await fetch(dataUrl)).blob();
-  const ref = fbStorage.ref(`images/p${projIdx}_${no}.jpg`);
-  await ref.put(blob, { contentType: 'image/jpeg' });
-  return ref.getDownloadURL();
-}
-
-/**
- * Upload a Blob directly (from fetch of remote URL).
- * Returns the permanent download URL.
- */
-async function fbUploadBlob(projIdx, no, blob) {
-  const ref = fbStorage.ref(`images/p${projIdx}_${no}.jpg`);
-  await ref.put(blob, { contentType: blob.type || 'image/jpeg' });
-  return ref.getDownloadURL();
-}
-
-/** Delete image from Storage (ignore if not found). */
-async function fbDeleteImage(projIdx, no) {
-  try { await fbStorage.ref(`images/p${projIdx}_${no}.jpg`).delete(); } catch (e) { /* ok */ }
-}
+// ─── Storage stubs (images stored in localStorage, not Firebase) ──────
+// Returns rejected promise so callers' .catch() runs without side-effects
+async function fbUploadDataUrl() { throw new Error('Storage not enabled'); }
+async function fbUploadBlob()    { throw new Error('Storage not enabled'); }
+async function fbDeleteImage()   { /* no-op */ }
