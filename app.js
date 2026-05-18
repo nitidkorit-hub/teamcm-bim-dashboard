@@ -1753,13 +1753,23 @@ async function loadProjectData(projIdx) {
       await fbSeedIssues(projIdx, PROJECT_ISSUES[projIdx] || []);
       toast(`✓ Project ready · ${(PROJECT_ISSUES[projIdx] || []).length} issues`, '#2DBE60');
     } else {
-      PROJECT_ISSUES[projIdx] = issues;
+      // Auto-fix disciplines on load (repairs PT0001 data from old CSV import bug)
+      let fixedCount = 0;
       issues.forEach(it => {
+        if (autoFixIssueDisc(it)) fixedCount++;
         if (it.imageUrl && it.imageUrl.startsWith('http')) {
           state.imgStore[`p${projIdx}_${it.no}`] = it.imageUrl;
         }
       });
-      toast(`🔴 Live sync · ${issues.length} issues`, '#2DBE60');
+      PROJECT_ISSUES[projIdx] = issues;
+      if (fixedCount > 0) {
+        toast(`🔧 ซ่อม disciplines ${fixedCount} issues — กำลังบันทึก…`, '#3A6EA5');
+        fbSeedIssues(projIdx, issues).then(() => {
+          toast(`✓ Synced · ${issues.length} issues (fixed ${fixedCount})`, '#2DBE60');
+        }).catch(e => console.warn('Firebase resave:', e));
+      } else {
+        toast(`🔴 Live sync · ${issues.length} issues`, '#2DBE60');
+      }
     }
   } catch (e) {
     console.error('Firebase load error:', e);
@@ -1768,12 +1778,14 @@ async function loadProjectData(projIdx) {
 
   // ─── Real-time listeners — auto-update when other devices write ───
   fbSubscribeIssues(projIdx, (issues) => {
-    PROJECT_ISSUES[projIdx] = issues;
+    // Normalize disciplines on every update
     issues.forEach(it => {
+      autoFixIssueDisc(it);
       if (it.imageUrl && it.imageUrl.startsWith('http')) {
         state.imgStore[`p${projIdx}_${it.no}`] = it.imageUrl;
       }
     });
+    PROJECT_ISSUES[projIdx] = issues;
     render();
   });
   fbSubscribeAudit(projIdx, (audit) => {
@@ -2133,6 +2145,46 @@ async function extractZipToImgMap(arrayBuffer, imgMap) {
   return added;
 }
 
+// Valid TEAM·CM discipline codes
+const VALID_DISC_CODES = ['EE','AC','AR','SN','FP','ST','LA','IN'];
+
+// Extract discipline from TEAM·CM title pattern: {runNo}_{issNo}_{date}_{zone}_{disc}_...
+function extractDiscFromTitle(title) {
+  if (!title) return null;
+  const parts = String(title).split('_');
+  // Try position 4 first (standard pattern)
+  for (let i = 3; i <= Math.min(5, parts.length - 1); i++) {
+    const candidate = (parts[i] || '').trim().toUpperCase();
+    if (VALID_DISC_CODES.includes(candidate)) return candidate;
+  }
+  // Fallback: scan all parts for a valid 2-letter code
+  for (const p of parts) {
+    const c = p.trim().toUpperCase();
+    if (VALID_DISC_CODES.includes(c)) return c;
+  }
+  return null;
+}
+
+// Repair issue.disc / discPrimary if it looks wrong (e.g. has the full title)
+function autoFixIssueDisc(it) {
+  if (!it) return false;
+  const code = String(it.discPrimary || '').trim().toUpperCase();
+  if (VALID_DISC_CODES.includes(code)) {
+    it.discPrimary = code;  // normalize case
+    return false;
+  }
+  const fromTitle = extractDiscFromTitle(it.title);
+  if (fromTitle) {
+    it.discPrimary = fromTitle;
+    it.disc = fromTitle;
+    return true;
+  }
+  // Last resort default
+  it.discPrimary = 'EE';
+  it.disc = 'EE';
+  return true;
+}
+
 // Find best image match for an issue using imgMap (by NO. / title / hyperlink)
 function findImageForIssue(imgMap, issue) {
   if (!imgMap || Object.keys(imgMap).length === 0) return null;
@@ -2216,11 +2268,13 @@ async function handleCsvFile(e) {
     const header = rows[0].map(h => h.trim().toLowerCase());
     const dataRows = rows.slice(1).filter(r => r.some(c => c.trim()));
 
-    // Map column indices from header
+    // Map column indices from header. Note: 'discription' (typo for 'description')
+    // must be matched as title, NOT as discipline.
     const col = {
       no:       header.findIndex(h => h === 'no.' || h === 'no'),
-      title:    header.findIndex(h => h.includes('description') || h.includes('title') || h.includes('viewpoint')),
-      disc:     header.findIndex(h => h.includes('disc')),
+      title:    header.findIndex(h => h.includes('viewpoint') || h.includes('discription') || h.includes('description') || h === 'title'),
+      // Discipline column: exact match only, exclude 'discription' typo
+      disc:     header.findIndex(h => h === 'discipline' || h === 'disc' || h === 'disc.'),
       zone:     header.findIndex(h => h === 'zone'),
       floor:    header.findIndex(h => h === 'floor'),
       grid:     header.findIndex(h => h === 'grid'),
@@ -2230,8 +2284,16 @@ async function handleCsvFile(e) {
       author:   header.findIndex(h => h.includes('author')),
       assignee: header.findIndex(h => h.includes('assignee')),
       daysOpen: header.findIndex(h => h.includes('days')),
-      imageUrl: header.findIndex(h => h.includes('image') || h.includes('img') || h.includes('url') || h.includes('hyperlink') || h.includes('link'))
+      imageUrl: header.findIndex(h => h.includes('image') || h.includes('hyperlink') || (h.includes('link') && !h.includes('discipline')))
     };
+
+    // Detect TEAM·CM CSV format: individual discipline columns (AR, ST, LA, IN, SN, AC, EE, FP)
+    const discColMap = {};
+    header.forEach((h, idx) => {
+      const u = h.toUpperCase().trim();
+      if (VALID_DISC_CODES.includes(u)) discColMap[u] = idx;
+    });
+    const hasIndividualDiscCols = Object.keys(discColMap).length >= 2;
 
     const get = (row, idx, def = '') => (idx >= 0 && idx < row.length) ? row[idx].trim() : def;
 
@@ -2244,8 +2306,29 @@ async function handleCsvFile(e) {
       const rawNo = get(row, col.no);
       const existingIdx = rawNo ? getIss().findIndex(i => i.no === rawNo) : -1;
       const no = rawNo || String(++maxNo);
-      const disc = get(row, col.disc, 'EE');
-      const discPrimary = disc.split(',')[0].trim();
+
+      // ─── Determine discipline ───
+      let disc;
+      if (hasIndividualDiscCols) {
+        // TEAM·CM format: collect each column with a non-empty mark (X / *)
+        const marks = [];
+        for (const code of VALID_DISC_CODES) {
+          if (discColMap[code] !== undefined) {
+            const val = (row[discColMap[code]] || '').trim();
+            if (val) marks.push(code);
+          }
+        }
+        disc = marks.length ? marks.join(', ') : 'EE';
+      } else {
+        disc = get(row, col.disc, 'EE');
+      }
+      let discPrimary = disc.split(',')[0].trim().toUpperCase();
+      // Safety: if discPrimary isn't a known code, try extracting from title
+      if (!VALID_DISC_CODES.includes(discPrimary)) {
+        const fromTitle = extractDiscFromTitle(get(row, col.title, ''));
+        if (fromTitle) { discPrimary = fromTitle; disc = fromTitle; }
+        else { discPrimary = 'EE'; disc = 'EE'; }
+      }
 
       const issue = {
         no,
