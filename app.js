@@ -1511,6 +1511,7 @@ function quickField(no, field, val) {
   if (!it) return;
   const old = it[field];
   it[field] = val;
+  fbSaveIssue(state.projIdx, it).catch(e => console.warn('Firestore:', e));
   toast(`✓ #${no}: ${field} ${old} → ${val}`, '#2DBE60');
   // re-render to update colors but keep scroll
   const y = window.scrollY;
@@ -1521,7 +1522,10 @@ function bulkUpdate(field, val) {
   if (!val) return;
   state.selected.forEach(no => {
     const it = getIss().find(i => i.no === no);
-    if (it) it[field] = val;
+    if (it) {
+      it[field] = val;
+      fbSaveIssue(state.projIdx, it).catch(e => console.warn('Firestore:', e));
+    }
   });
   toast(`✓ Updated ${state.selected.size} issues — ${field}: ${val}`, '#2DBE60');
   state.selected.clear();
@@ -1531,7 +1535,11 @@ function bulkDelete() {
   const n = state.selected.size;
   state.selected.forEach(no => {
     const idx = getIss().findIndex(i => i.no === no);
-    if (idx >= 0) getIss().splice(idx, 1);
+    if (idx >= 0) {
+      getIss().splice(idx, 1);
+      fbDeleteIssue(state.projIdx, no).catch(e => console.warn('Firestore:', e));
+      fbDeleteImage(state.projIdx, no).catch(e => console.warn('Storage:', e));
+    }
   });
   toast(`❌ Deleted ${n} issues`, '#dc2626');
   state.selected.clear();
@@ -1598,8 +1606,95 @@ function render() {
 }
 
 // Init
-document.addEventListener('DOMContentLoaded', () => {
+// ============== Firebase Auth gate ==============
+function showAuthGate() {
+  let gate = document.getElementById('auth-gate');
+  if (gate) { gate.style.display = 'flex'; return; }
+  gate = document.createElement('div');
+  gate.id = 'auth-gate';
+  gate.style.cssText = [
+    'position:fixed;inset:0;z-index:9999',
+    'background:linear-gradient(160deg,#06101e 0%,#0d1f3c 60%,#0a2040 100%)',
+    'display:flex;align-items:center;justify-content:center;flex-direction:column;gap:0'
+  ].join(';');
+  gate.innerHTML = `
+    <div style="display:flex;flex-direction:column;align-items:center;gap:28px;padding:48px 36px;max-width:420px;width:100%">
+      <!-- Logo + title -->
+      <div style="text-align:center">
+        <div style="display:inline-flex;align-items:center;justify-content:center;width:64px;height:64px;background:linear-gradient(135deg,#3A6EA5,#1F3A5F);border-radius:16px;margin-bottom:16px;box-shadow:0 8px 32px rgba(58,110,165,.4)">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
+        </div>
+        <div style="font-family:Montserrat;font-weight:800;font-size:13px;letter-spacing:3px;color:#3A6EA5;text-transform:uppercase;margin-bottom:8px">TEAM · CM</div>
+        <h1 style="font-family:Montserrat;font-weight:800;font-size:26px;color:#f1f5f9;margin:0 0 10px;line-height:1.2">BIM Coordination<br/>Dashboard</h1>
+        <p style="font-family:Sarabun;color:#64748b;font-size:14px;margin:0">เข้าสู่ระบบด้วย Google Account ของทีม</p>
+      </div>
+      <!-- Sign-in button -->
+      <button id="auth-google-btn" onclick="fbSignIn().catch(e=>toast('❌ '+e.message,'#dc2626'))"
+        style="display:flex;align-items:center;gap:12px;padding:14px 28px;background:#fff;color:#1a2540;border:none;border-radius:12px;font-family:Montserrat;font-weight:700;font-size:15px;cursor:pointer;box-shadow:0 4px 24px rgba(0,0,0,.3);transition:transform .15s,box-shadow .15s;width:100%;justify-content:center"
+        onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 8px 32px rgba(0,0,0,.4)'"
+        onmouseout="this.style.transform='';this.style.boxShadow='0 4px 24px rgba(0,0,0,.3)'">
+        <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+        Sign in with Google
+      </button>
+      <p style="font-family:Sarabun;font-size:12px;color:#334155;text-align:center;line-height:1.6">
+        สำหรับทีม TEAM·CM เท่านั้น<br/>ระบบจะบันทึกข้อมูลลง Firebase โดยอัตโนมัติ
+      </p>
+    </div>`;
+  document.body.appendChild(gate);
+}
+
+async function handleAuthStateChange(firebaseUser) {
+  const gate = document.getElementById('auth-gate');
+  if (!firebaseUser) {
+    showAuthGate();
+    return;
+  }
+  // Hide auth gate
+  if (gate) gate.style.display = 'none';
+
+  // Set state.user from Firebase Auth
+  const displayName = firebaseUser.displayName || firebaseUser.email.split('@')[0];
+  state.user = {
+    id: 0,
+    name: displayName,
+    email: firebaseUser.email,
+    role: 'BIM Coordinator',
+    avatar: firebaseUser.photoURL || null,
+    lastActive: 'just now'
+  };
+
+  // Load project data from Firestore
+  await loadProjectData(state.projIdx);
+}
+
+async function loadProjectData(projIdx) {
+  try {
+    const issues = await fbLoadIssues(projIdx);
+    if (issues === null) {
+      // First time — seed Firestore from mock data
+      toast('🌱 กำลัง setup project ครั้งแรก…', '#3A6EA5');
+      await fbSeedIssues(projIdx, PROJECT_ISSUES[projIdx] || []);
+      toast(`✓ Project ready · ${(PROJECT_ISSUES[projIdx] || []).length} issues`, '#2DBE60');
+    } else {
+      PROJECT_ISSUES[projIdx] = issues;
+      // Restore Firebase Storage image URLs from issue data
+      issues.forEach(it => {
+        if (it.imageUrl && it.imageUrl.startsWith('http')) {
+          state.imgStore[`p${projIdx}_${it.no}`] = it.imageUrl;
+        }
+      });
+      toast(`✓ Synced Firebase · ${issues.length} issues`, '#2DBE60');
+    }
+  } catch (e) {
+    console.error('Firestore load error:', e);
+    toast('⚠️ Offline mode — ใช้ข้อมูล local', '#d97706');
+  }
   render();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  // Apply theme immediately (before auth resolves)
+  applyTheme();
 
   // Backdrop click closes slide-over
   $('#so-backdrop').addEventListener('click', closeDetail);
@@ -1620,16 +1715,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Escape') { closeCmd(); closeDetail(); }
   });
 
-  // Welcome toast
-  setTimeout(() => toast('✓ Synced with Firebase · 145 issues loaded'), 500);
-
-  // Apply theme
-  applyTheme();
-
   // File input handlers
   $('#csv-input').addEventListener('change', handleCsvFile);
 
-  // Notification close on outside click
+  // Notification / menu close on outside click
   document.addEventListener('click', (e) => {
     const pop = $('#notif-pop');
     if (pop && pop.classList.contains('open') && !e.target.closest('#notif-pop') && !e.target.closest('[title="Notifications"]')) {
@@ -1639,15 +1728,17 @@ document.addEventListener('DOMContentLoaded', () => {
     if (projMenu && projMenu.classList.contains('open') && !e.target.closest('#proj-menu') && !e.target.closest('#proj-switch')) {
       projMenu.classList.remove('open');
     }
-    // close proj-actions menus
     document.querySelectorAll('.proj-actions').forEach(m => {
       if (m.style.display === 'block' && !e.target.closest('.proj-card-menu')) {
         m.style.display = 'none';
       }
     });
-    // close multi-select menus
     $$('.ms-menu.open').forEach(m => { if (!e.target.closest('.ms-wrap')) m.classList.remove('open'); });
   });
+
+  // Show auth gate, then wait for Firebase to resolve auth state
+  showAuthGate();
+  fbAuth.onAuthStateChanged(handleAuthStateChange);
 });
 
 // ============== Theme ==============
@@ -1696,35 +1787,36 @@ function readImageAsDataURL(file, maxDim = 1280) {
     reader.readAsDataURL(file);
   });
 }
-async function uploadImage(event, no) {
-  const file = event.target.files && event.target.files[0];
-  if (!file) return;
+async function _handleImageFile(file, no) {
   if (!file.type.startsWith('image/')) { toast('⚠️ ต้องเป็นไฟล์รูปภาพ', '#d97706'); return; }
   try {
+    // Show locally first (base64 preview)
     const data = await readImageAsDataURL(file);
     setImg(no, data);
     persistImgs();
     toast(`✓ อัปเดตรูป Issue #${no}`, '#2DBE60');
     openDetail(no);
+    // Upload to Firebase Storage in background, then persist URL in Firestore
+    fbUploadDataUrl(state.projIdx, no, data).then(url => {
+      setImg(no, url);
+      const it = getIss().find(i => i.no === no);
+      if (it) { it.imageUrl = url; fbSaveIssue(state.projIdx, it).catch(() => {}); }
+    }).catch(e => console.warn('Storage upload:', e));
   } catch (e) {
     toast('❌ อัปโหลดรูปไม่สำเร็จ', '#dc2626');
   }
+}
+async function uploadImage(event, no) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  await _handleImageFile(file, no);
 }
 async function dropImage(event, no) {
   event.preventDefault();
   event.currentTarget.classList.remove('drag-over');
   const file = event.dataTransfer.files && event.dataTransfer.files[0];
   if (!file) return;
-  if (!file.type.startsWith('image/')) { toast('⚠️ ต้องเป็นไฟล์รูปภาพ', '#d97706'); return; }
-  try {
-    const data = await readImageAsDataURL(file);
-    setImg(no, data);
-    persistImgs();
-    toast(`✓ อัปเดตรูป Issue #${no}`, '#2DBE60');
-    openDetail(no);
-  } catch (e) {
-    toast('❌ อัปโหลดรูปไม่สำเร็จ', '#dc2626');
-  }
+  await _handleImageFile(file, no);
 }
 function removeImage(no) {
   if (!confirm(`ลบรูปของ Issue #${no}?`)) return;
@@ -1974,19 +2066,37 @@ function handleCsvFile(e) {
 
     state.notifications = [];
     toast('✓ Import ' + importedCount + ' issues จาก ' + file.name + (imageQueue.length ? ' · กำลังโหลด ' + imageQueue.length + ' รูป…' : ''), '#2DBE60');
+    // Sync all imported issues to Firestore in one batch
+    fbSeedIssues(state.projIdx, getIss()).catch(e => console.warn('Firestore seed:', e));
+    fbAddAudit(state.projIdx, getAud()[0]).catch(() => {});
     render();
 
-    // Fetch images from hyperlinks in CSV
+    // Fetch images from hyperlinks in CSV, then upload to Firebase Storage
     if (imageQueue.length > 0) {
       let imageCount = 0, failedImages = 0;
       for (const item of imageQueue) {
         try {
-          const data = await fetchImageAsDataURL(item.url);
-          setImg(item.no, data);
+          // Fetch remote image as blob
+          const res = await fetch(item.url);
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const blob = await res.blob();
+          // Upload to Firebase Storage and get permanent URL
+          const url = await fbUploadBlob(state.projIdx, item.no, blob);
+          setImg(item.no, url);
+          // Store imageUrl in the issue doc
+          const it = getIss().find(i => i.no === item.no);
+          if (it) { it.imageUrl = url; fbSaveIssue(state.projIdx, it).catch(() => {}); }
           imageCount++;
         } catch (err) {
-          console.warn('Image fetch failed for #' + item.no + ':', item.url, err.message);
-          failedImages++;
+          // Fallback: fetch as base64 and store locally only
+          try {
+            const data = await fetchImageAsDataURL(item.url);
+            setImg(item.no, data);
+            imageCount++;
+          } catch (e2) {
+            console.warn('Image fetch failed for #' + item.no + ':', item.url);
+            failedImages++;
+          }
         }
       }
       persistImgs();
@@ -2141,12 +2251,14 @@ function saveNewIssue() {
     createdAt: new Date().toISOString()
   };
   getIss().unshift(it);
+  fbSaveIssue(state.projIdx, it).catch(e => console.warn('Firestore:', e));
   getAud().unshift({
     ts: '15/05/26 ' + new Date().toTimeString().slice(0,5),
     issueNo: newNo, issueTitle: title,
     action: 'Issue Created', field:'', oldVal:'', newVal:'',
     user: state.user.name
   });
+  fbAddAudit(state.projIdx, getAud()[0]).catch(e => console.warn('Firestore audit:', e));
   closeModal();
   toast(`✓ Created Issue #${newNo}`, '#2DBE60');
   state.notifications = [];
@@ -2194,6 +2306,7 @@ function saveEditIssue(no) {
   it.priority = $('#ed-prio').value;
   it.status = $('#ed-status').value;
   it.comment = $('#ed-comment').value;
+  fbSaveIssue(state.projIdx, it).catch(e => console.warn('Firestore:', e));
   closeModal();
   toast(`✓ Updated Issue #${no}`, '#2DBE60');
   render();
@@ -2205,12 +2318,14 @@ function markResolved(no) {
   const wasResolved = it.status === 'RESOLVED';
   const old = it.status;
   it.status = wasResolved ? 'ACTIVE' : 'RESOLVED';
+  fbSaveIssue(state.projIdx, it).catch(e => console.warn('Firestore:', e));
   getAud().unshift({
     ts: '15/05/26 ' + new Date().toTimeString().slice(0,5),
     issueNo: no, issueTitle: it.title,
     action:'Status Change', field:'status', oldVal: old, newVal: it.status,
     user: state.user.name
   });
+  fbAddAudit(state.projIdx, getAud()[0]).catch(e => console.warn('Firestore audit:', e));
   toast(wasResolved ? `↻ Reopened Issue #${no}` : `✓ Resolved Issue #${no}`, '#2DBE60');
   state.notifications = [];
   render();
@@ -2221,12 +2336,15 @@ function confirmDeleteIssue(no) {
   const idx = getIss().findIndex(i => i.no === no);
   if (idx >= 0) {
     const it = getIss().splice(idx,1)[0];
+    fbDeleteIssue(state.projIdx, no).catch(e => console.warn('Firestore:', e));
+    fbDeleteImage(state.projIdx, no).catch(e => console.warn('Storage:', e));
     getAud().unshift({
       ts: '15/05/26 ' + new Date().toTimeString().slice(0,5),
       issueNo: no, issueTitle: it.title,
       action:'Issue Deleted', field:'', oldVal:'', newVal:'',
       user: state.user.name
     });
+    fbAddAudit(state.projIdx, getAud()[0]).catch(e => console.warn('Firestore audit:', e));
     delImg(no);
     persistImgs();
   }
@@ -2500,7 +2618,7 @@ function openUserMenu() {
           <button class="btn btn-g" style="justify-content:flex-start;padding:9px 12px" onclick="toggleTheme();closeModal()">${state.theme==='dark'?I.sun:I.moon}<span>Switch to ${state.theme==='dark'?'Light':'Dark'} mode</span></button>
           <button class="btn btn-g" style="justify-content:flex-start;padding:9px 12px" onclick="closeModal();goPage('users')">${I.users}<span>Manage Users</span></button>
           <button class="btn btn-g" style="justify-content:flex-start;padding:9px 12px" onclick="closeModal();exportData()">${I.download}<span>Export Backup</span></button>
-          <button class="btn btn-d" style="justify-content:flex-start;padding:9px 12px" onclick="closeModal()">${I.close}<span>Sign out</span></button>
+          <button class="btn btn-d" style="justify-content:flex-start;padding:9px 12px" onclick="closeModal();fbSignOut()">${I.close}<span>Sign out</span></button>
         </div>
       </div>
     </div>`);
@@ -2739,16 +2857,16 @@ function toggleProjMenu(e) {
   const m = $('#proj-menu');
   if (m) m.classList.toggle('open');
 }
-function switchProject(idx) {
+async function switchProject(idx) {
   if (idx === state.projIdx) { toggleProjMenu(); return; }
   state.projIdx = idx;
   state.selected.clear();
   state.pageNum = 1;
   state.filters = { status:'all', disc:'all', prio:'all', zone:'all', q:'' };
   state.notifications = [];
-  toast(`✓ Switched to ${PROJECTS[idx].name}`, '#2DBE60');
   closeModal();
-  render();
+  render();  // render immediately with cached/mock data
+  await loadProjectData(idx);  // then sync from Firestore
 }
 
 // ============== Expose ==============
@@ -2765,5 +2883,7 @@ Object.assign(window, {
   discMSOpen, discMSToggle, discMSSetAll, discMSPreset, toggleReportSection,
   previewReport, generatePDF, downloadRecentReport,
   toggleProjMenu, switchProject,
-  openEditProject, saveEditProject, confirmDeleteProject, duplicateProject, toggleProjActions
+  openEditProject, saveEditProject, confirmDeleteProject, duplicateProject, toggleProjActions,
+  // Firebase Auth
+  fbSignIn, fbSignOut
 });
