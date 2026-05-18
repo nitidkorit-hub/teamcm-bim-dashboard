@@ -192,8 +192,80 @@ function fbSubscribeUsers(callback) {
   _fbListeners.users = { ref, fn };
 }
 
-// ─── Storage stubs (images stored in localStorage, not Firebase) ──────
-// Returns rejected promise so callers' .catch() runs without side-effects
-async function fbUploadDataUrl() { throw new Error('Storage not enabled'); }
-async function fbUploadBlob()    { throw new Error('Storage not enabled'); }
-async function fbDeleteImage()   { /* no-op */ }
+// ─── Cloud Storage (Firebase Storage Integration) ───────────────────
+/** Upload image from data URL to Cloud Storage */
+async function fbUploadDataUrl(projIdx, issueNo, dataUrl) {
+  try {
+    const blob = await (await fetch(dataUrl)).blob();
+    return fbUploadBlob(projIdx, issueNo, blob);
+  } catch (e) {
+    console.error('fbUploadDataUrl error:', e);
+    throw e;
+  }
+}
+
+/** Upload image from Blob to Cloud Storage */
+async function fbUploadBlob(projIdx, issueNo, blob) {
+  if (!fbAuth.currentUser) throw new Error('User not authenticated');
+
+  try {
+    const bucket = firebaseConfig.storageBucket;
+    const fileName = `${Date.now()}_${issueNo}.png`;
+    const path = `projects/${fbPid(projIdx)}/issues/${issueNo}/${fileName}`;
+
+    // Get ID token for authentication
+    const token = await fbAuth.currentUser.getIdToken();
+
+    // Upload to Firebase Cloud Storage via REST API
+    const uploadUrl = `https://www.googleapis.com/upload/storage/v1/b/${bucket}/o?uploadType=media&name=${encodeURIComponent(path)}`;
+
+    const response = await fetch(uploadUrl, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      },
+      body: blob
+    });
+
+    if (!response.ok) {
+      throw new Error(`Upload failed: ${response.status} ${response.statusText}`);
+    }
+
+    // Return public URL to the uploaded file
+    const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media`;
+    console.log('Image uploaded:', publicUrl);
+    return publicUrl;
+  } catch (e) {
+    console.error('fbUploadBlob error:', e);
+    throw e;
+  }
+}
+
+/** Delete image from Cloud Storage */
+async function fbDeleteImage(projIdx, issueNo) {
+  if (!fbAuth.currentUser) {
+    console.warn('User not authenticated, skipping delete');
+    return;
+  }
+
+  try {
+    const bucket = firebaseConfig.storageBucket;
+    const path = `projects/${fbPid(projIdx)}/issues/${issueNo}`;
+
+    const token = await fbAuth.currentUser.getIdToken();
+    const deleteUrl = `https://www.googleapis.com/storage/v1/b/${bucket}/o/${encodeURIComponent(path)}`;
+
+    const response = await fetch(deleteUrl, {
+      method: 'DELETE',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    if (!response.ok && response.status !== 404) {
+      console.warn(`Delete failed: ${response.status}`);
+    }
+  } catch (e) {
+    console.warn('fbDeleteImage error:', e);
+  }
+}
