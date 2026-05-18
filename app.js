@@ -2300,6 +2300,7 @@ async function handleCsvFile(e) {
     let maxNo = Math.max(...getIss().map(i => +i.no || 0), 0);
     let importedCount = 0;
     const imageQueue = [];
+    const uploadQueue = []; // Local images to upload to Cloud Storage (for persistence)
     const newIssues = [];
 
     for (const row of dataRows) {
@@ -2361,6 +2362,8 @@ async function handleCsvFile(e) {
       const localImg = findImageForIssue(imgMap, issue);
       if (localImg) {
         setImg(no, localImg);
+        // Queue for Cloud Storage upload so rูปไม่หายตอน reload หรือเปลี่ยน device
+        uploadQueue.push({ no, dataUrl: localImg });
       } else if (imgUrl && /^https?:\/\//i.test(imgUrl)) {
         // Only queue HTTP URLs for async fetch — skip Excel HYPERLINK formulas
         imageQueue.push({ no, url: imgUrl });
@@ -2388,6 +2391,33 @@ async function handleCsvFile(e) {
     fbSeedIssues(state.projIdx, getIss()).catch(e => console.warn('Firebase seed:', e));
     fbAddAudit(state.projIdx, getAud()[0]).catch(() => {});
     render();
+
+    // Upload local images (from ZIP/files) to Cloud Storage for persistence
+    if (uploadQueue.length > 0) {
+      toast(`⬆️ อัปโหลดรูป ${uploadQueue.length} ภาพไป Cloud Storage…`, '#3A6EA5');
+      let uploaded = 0, failed = 0;
+      for (const item of uploadQueue) {
+        try {
+          const url = await fbUploadDataUrl(state.projIdx, item.no, item.dataUrl);
+          // Replace localStorage data URL with public Cloud Storage URL
+          setImg(item.no, url);
+          const it = getIss().find(i => i.no === item.no);
+          if (it) {
+            it.imageUrl = url;
+            fbSaveIssue(state.projIdx, it).catch(() => {});
+          }
+          uploaded++;
+        } catch (e) {
+          console.warn('Storage upload failed #' + item.no + ':', e);
+          failed++;
+        }
+      }
+      persistImgs();
+      toast(
+        `✓ อัปโหลดรูป ${uploaded}/${uploadQueue.length} ไป Cloud Storage` + (failed ? ` · ล้มเหลว ${failed}` : ''),
+        uploaded > 0 ? '#2DBE60' : '#d97706'
+      );
+    }
 
     // Fetch images from HTTP URLs in CSV (only those not matched locally)
     if (imageQueue.length > 0) {
