@@ -25,6 +25,7 @@ function fbSignIn() {
   return fbAuth.signInWithPopup(googleProvider);
 }
 function fbSignOut() {
+  fbUnsubscribeAll();
   return fbAuth.signOut().then(() => location.reload());
 }
 
@@ -109,6 +110,70 @@ async function fbSaveUsers(users) {
   const data = {};
   users.forEach(u => { data[String(u.id)] = u; });
   return fbDb.ref('users').set(data);
+}
+
+// ─── Real-time listeners (auto-sync across devices) ──────────────────
+// Tracks active subscriptions so we can clean them up on project switch.
+const _fbListeners = {};
+
+function _unsubscribe(key) {
+  const ent = _fbListeners[key];
+  if (ent) { try { ent.ref.off('value', ent.fn); } catch (e) {} delete _fbListeners[key]; }
+}
+
+function fbUnsubscribeAll() {
+  Object.keys(_fbListeners).forEach(_unsubscribe);
+}
+
+/** Subscribe to issues for a project — fires whenever any device writes. */
+function fbSubscribeIssues(projIdx, callback) {
+  _unsubscribe('issues');
+  const ref = fbDb.ref(`issues/${fbPid(projIdx)}`);
+  const fn = snap => {
+    const data = snap.val();
+    const arr = data ? Object.values(data).sort((a, b) => parseInt(a.no) - parseInt(b.no)) : [];
+    callback(arr);
+  };
+  ref.on('value', fn);
+  _fbListeners.issues = { ref, fn };
+}
+
+/** Subscribe to audit log for a project. */
+function fbSubscribeAudit(projIdx, callback) {
+  _unsubscribe('audit');
+  const ref = fbDb.ref(`audit/${fbPid(projIdx)}`).orderByChild('_ts').limitToLast(100);
+  const fn = snap => {
+    const data = snap.val();
+    if (!data) { callback([]); return; }
+    const rows = Object.values(data).reverse();
+    callback(rows.map(r => { const x = { ...r }; delete x._ts; return x; }));
+  };
+  ref.on('value', fn);
+  _fbListeners.audit = { ref, fn };
+}
+
+/** Subscribe to global projects list. */
+function fbSubscribeProjects(callback) {
+  _unsubscribe('projects');
+  const ref = fbDb.ref('projects');
+  const fn = snap => {
+    const data = snap.val();
+    callback(data ? Object.values(data).sort((a, b) => (a.id ?? 0) - (b.id ?? 0)) : []);
+  };
+  ref.on('value', fn);
+  _fbListeners.projects = { ref, fn };
+}
+
+/** Subscribe to global users list. */
+function fbSubscribeUsers(callback) {
+  _unsubscribe('users');
+  const ref = fbDb.ref('users');
+  const fn = snap => {
+    const data = snap.val();
+    callback(data ? Object.values(data).sort((a, b) => (a.id ?? 0) - (b.id ?? 0)) : []);
+  };
+  ref.on('value', fn);
+  _fbListeners.users = { ref, fn };
 }
 
 // ─── Storage stubs (images stored in localStorage, not Firebase) ──────

@@ -1711,7 +1711,22 @@ async function handleAuthStateChange(firebaseUser) {
     console.warn('Cloud sync (projects/users):', e);
   }
 
-  // Load project data from Firebase
+  // ─── Real-time listeners for global PROJECTS + USERS ───
+  fbSubscribeProjects((projects) => {
+    if (projects.length === 0) return;
+    PROJECTS.length = 0;
+    projects.forEach(p => PROJECTS.push(p));
+    if (state.projIdx >= PROJECTS.length) state.projIdx = 0;
+    render();
+  });
+  fbSubscribeUsers((users) => {
+    if (users.length === 0) return;
+    USERS.length = 0;
+    users.forEach(u => USERS.push(u));
+    if (state.page === 'users') render();
+  });
+
+  // Load project data from Firebase (sets up issues + audit listeners)
   await loadProjectData(state.projIdx);
 }
 
@@ -1719,24 +1734,39 @@ async function loadProjectData(projIdx) {
   try {
     const issues = await fbLoadIssues(projIdx);
     if (issues === null) {
-      // First time — seed Firestore from mock data
+      // First time — seed RTDB from mock data
       toast('🌱 กำลัง setup project ครั้งแรก…', '#3A6EA5');
       await fbSeedIssues(projIdx, PROJECT_ISSUES[projIdx] || []);
       toast(`✓ Project ready · ${(PROJECT_ISSUES[projIdx] || []).length} issues`, '#2DBE60');
     } else {
       PROJECT_ISSUES[projIdx] = issues;
-      // Restore Firebase Storage image URLs from issue data
       issues.forEach(it => {
         if (it.imageUrl && it.imageUrl.startsWith('http')) {
           state.imgStore[`p${projIdx}_${it.no}`] = it.imageUrl;
         }
       });
-      toast(`✓ Synced Firebase · ${issues.length} issues`, '#2DBE60');
+      toast(`🔴 Live sync · ${issues.length} issues`, '#2DBE60');
     }
   } catch (e) {
-    console.error('Firestore load error:', e);
+    console.error('Firebase load error:', e);
     toast('⚠️ Offline mode — ใช้ข้อมูล local', '#d97706');
   }
+
+  // ─── Real-time listeners — auto-update when other devices write ───
+  fbSubscribeIssues(projIdx, (issues) => {
+    PROJECT_ISSUES[projIdx] = issues;
+    issues.forEach(it => {
+      if (it.imageUrl && it.imageUrl.startsWith('http')) {
+        state.imgStore[`p${projIdx}_${it.no}`] = it.imageUrl;
+      }
+    });
+    render();
+  });
+  fbSubscribeAudit(projIdx, (audit) => {
+    PROJECT_AUDIT[projIdx] = audit;
+    if (['audit','dashboard','analytics'].includes(state.page)) render();
+  });
+
   render();
 }
 
