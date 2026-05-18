@@ -18,11 +18,28 @@ firebase.initializeApp(firebaseConfig);
 
 const fbAuth = firebase.auth();
 const fbDb   = firebase.database();
+
+// ─── Auth providers ──────────────────────────────────────────────────
 const googleProvider = new firebase.auth.GoogleAuthProvider();
 
-// ─── Auth ────────────────────────────────────────────────────────────
+const microsoftProvider = new firebase.auth.OAuthProvider('microsoft.com');
+microsoftProvider.setCustomParameters({
+  // 'common' lets any Microsoft account sign in; the app-level domain check
+  // in app.js then restricts to @teamcm.co.th. Replace with your tenant GUID
+  // (or 'teamcm.co.th') to tighten the OAuth flow itself.
+  tenant: 'common',
+  prompt: 'select_account'
+});
+// Request email + profile scopes
+microsoftProvider.addScope('email');
+microsoftProvider.addScope('profile');
+microsoftProvider.addScope('openid');
+
 function fbSignIn() {
   return fbAuth.signInWithPopup(googleProvider);
+}
+function fbSignInMicrosoft() {
+  return fbAuth.signInWithPopup(microsoftProvider);
 }
 function fbSignOut() {
   fbUnsubscribeAll();
