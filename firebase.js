@@ -16,8 +16,9 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 
-const fbAuth = firebase.auth();
-const fbDb   = firebase.database();
+const fbAuth    = firebase.auth();
+const fbDb      = firebase.database();
+const fbStorage = firebase.storage();
 
 // ─── Auth providers ──────────────────────────────────────────────────
 const googleProvider = new firebase.auth.GoogleAuthProvider();
@@ -192,8 +193,19 @@ function fbSubscribeUsers(callback) {
   _fbListeners.users = { ref, fn };
 }
 
-// ─── Cloud Storage (Firebase Storage Integration) ───────────────────
-/** Upload image from data URL to Cloud Storage */
+// ─── Cloud Storage (Firebase Storage SDK) ────────────────────────────
+// Uses Firebase Storage compat SDK — handles auth + rules automatically.
+// Path pattern: projects/{pid}/issues/{no}/images/{timestamp}_{no}.png
+// Matches Security Rules:
+//   match /projects/{projectId}/issues/{issueId}/images/{fileName}
+
+/** Build the Storage path for an issue image */
+function _fbStoragePath(projIdx, issueNo, fileName) {
+  const safeNo = String(issueNo).replace(/[.$#[\]/]/g, '_');
+  return `projects/${fbPid(projIdx)}/issues/${safeNo}/images/${fileName}`;
+}
+
+/** Upload image from data URL to Cloud Storage. Returns public download URL. */
 async function fbUploadDataUrl(projIdx, issueNo, dataUrl) {
   try {
     const blob = await (await fetch(dataUrl)).blob();
@@ -204,67 +216,32 @@ async function fbUploadDataUrl(projIdx, issueNo, dataUrl) {
   }
 }
 
-/** Upload image from Blob to Cloud Storage */
+/** Upload image from Blob to Cloud Storage. Returns public download URL. */
 async function fbUploadBlob(projIdx, issueNo, blob) {
   if (!fbAuth.currentUser) throw new Error('User not authenticated');
 
-  try {
-    const bucket = firebaseConfig.storageBucket;
-    const fileName = `${Date.now()}_${issueNo}.png`;
-    const path = `projects/${fbPid(projIdx)}/issues/${issueNo}/${fileName}`;
+  const fileName = `${Date.now()}_${issueNo}.png`;
+  const path = _fbStoragePath(projIdx, issueNo, fileName);
 
-    // Get ID token for authentication
-    const token = await fbAuth.currentUser.getIdToken();
-
-    // Upload to Firebase Cloud Storage via REST API
-    const uploadUrl = `https://www.googleapis.com/upload/storage/v1/b/${bucket}/o?uploadType=media&name=${encodeURIComponent(path)}`;
-
-    const response = await fetch(uploadUrl, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      },
-      body: blob
-    });
-
-    if (!response.ok) {
-      throw new Error(`Upload failed: ${response.status} ${response.statusText}`);
-    }
-
-    // Return public URL to the uploaded file
-    const publicUrl = `https://firebasestorage.googleapis.com/v0/b/${bucket}/o/${encodeURIComponent(path)}?alt=media`;
-    console.log('Image uploaded:', publicUrl);
-    return publicUrl;
-  } catch (e) {
-    console.error('fbUploadBlob error:', e);
-    throw e;
-  }
+  // Use Firebase Storage SDK — handles auth, rules, and CORS automatically
+  const ref = fbStorage.ref(path);
+  const snapshot = await ref.put(blob, { contentType: blob.type || 'image/png' });
+  const url = await snapshot.ref.getDownloadURL();
+  console.log('Image uploaded:', url);
+  return url;
 }
 
-/** Delete image from Cloud Storage */
+/** Delete all images for an issue from Cloud Storage. */
 async function fbDeleteImage(projIdx, issueNo) {
   if (!fbAuth.currentUser) {
     console.warn('User not authenticated, skipping delete');
     return;
   }
-
   try {
-    const bucket = firebaseConfig.storageBucket;
-    const path = `projects/${fbPid(projIdx)}/issues/${issueNo}`;
-
-    const token = await fbAuth.currentUser.getIdToken();
-    const deleteUrl = `https://www.googleapis.com/storage/v1/b/${bucket}/o/${encodeURIComponent(path)}`;
-
-    const response = await fetch(deleteUrl, {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${token}`
-      }
-    });
-
-    if (!response.ok && response.status !== 404) {
-      console.warn(`Delete failed: ${response.status}`);
-    }
+    const safeNo = String(issueNo).replace(/[.$#[\]/]/g, '_');
+    const folderRef = fbStorage.ref(`projects/${fbPid(projIdx)}/issues/${safeNo}/images`);
+    const list = await folderRef.listAll();
+    await Promise.all(list.items.map(item => item.delete().catch(() => {})));
   } catch (e) {
     console.warn('fbDeleteImage error:', e);
   }
