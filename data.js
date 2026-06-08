@@ -8,14 +8,22 @@ const PROJECTS = [
   { id: 1, name: 'Sample Project B', code: 'DEMO-SAMPLE-B', desc: 'ตัวอย่างที่ 2 — Import CSV ของคุณได้เลย', active: false, phase: 'IFC42', status: 'On Hold' }
 ];
 
+// USERS list — populated from Firebase + auto-grows as new users sign in.
+// Default seed: ระบบเจ้าของ (Admin) — คนอื่นจะถูก auto-add เป็น Viewer เมื่อ login ครั้งแรก
 const USERS = [
-  { id: 1, name: 'Nitid Saksittikan',  email: 'nitid_s@teamcm.co.th',   role: 'BIM Manager',  lastActive: 'just now' },
-  { id: 2, name: 'Pasit Charoenpong',  email: 'pasit_c@teamcm.co.th',   role: 'Admin',        lastActive: '12m ago'  },
-  { id: 3, name: 'Wassana Tongdee',    email: 'wassana_t@teamcm.co.th', role: 'Coordinator',  lastActive: '1h ago'   },
-  { id: 4, name: 'Kittipong Lertsiri', email: 'kittipong_l@teamcm.co.th',role:'Coordinator',  lastActive: '3h ago'   },
-  { id: 5, name: 'Anchalee Pongsak',   email: 'anchalee_p@teamcm.co.th',role: 'Viewer',       lastActive: 'yesterday'},
-  { id: 6, name: 'Somchai Nakorn',     email: 'somchai_n@teamcm.co.th', role: 'Coordinator',  lastActive: '2d ago'   }
+  { id: 1, name: 'Nitid Saksittikan', email: 'nitid_s@teamcm.co.th', role: 'Admin', lastActive: 'just now' }
 ];
+
+// ─── Role-based Permissions ──────────────────────────────────────────
+// Action keys: create, edit, delete, import, report, users (manage users)
+const PERMISSIONS = {
+  'Admin':       { create: true,  edit: true,  delete: true,  import: true,  report: true,  users: true  },
+  'BIM Manager': { create: true,  edit: true,  delete: false, import: true,  report: true,  users: false },
+  'Coordinator': { create: false, edit: true,  delete: false, import: false, report: true,  users: false },
+  'Viewer':      { create: false, edit: false, delete: false, import: false, report: true,  users: false }
+};
+const DEFAULT_ROLE = 'Viewer';   // role for first-time sign-ins
+const VALID_ROLES = ['Admin','BIM Manager','Coordinator','Viewer'];
 
 const DISC_TITLES = {
   EE: [

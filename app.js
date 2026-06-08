@@ -85,6 +85,22 @@ function toast(msg, color) {
   toast._tm = setTimeout(()=>t.classList.remove('show'), 2200);
 }
 
+// ===== Role-based permissions =====
+// Returns true if current user's role can perform `action`.
+// action ∈ 'create' | 'edit' | 'delete' | 'import' | 'report' | 'users'
+function hasPermission(action) {
+  const role = state.user && state.user.role;
+  const perms = (typeof PERMISSIONS !== 'undefined' && PERMISSIONS[role]) || null;
+  return !!(perms && perms[action]);
+}
+/** Guard wrapper — show toast and return false if user lacks permission. */
+function requirePermission(action, label) {
+  if (hasPermission(action)) return true;
+  const role = (state.user && state.user.role) || '—';
+  toast(`🚫 ไม่มีสิทธิ์${label ? ' ' + label : ''} (role: ${role})`, '#dc2626');
+  return false;
+}
+
 // ===== Filtering =====
 function getFiltered() {
   const f = state.filters;
@@ -182,7 +198,7 @@ function renderSidebar() {
 
     <div class="sb-sec">Management</div>
     <div class="ni ${state.page==='projects'?'active':''}" data-page="projects">${I.projects}<span>Projects</span></div>
-    <div class="ni ${state.page==='users'?'active':''}" data-page="users">${I.users}<span>Users &amp; Roles</span></div>
+    ${hasPermission('users') ? `<div class="ni ${state.page==='users'?'active':''}" data-page="users">${I.users}<span>Users &amp; Roles</span></div>` : ''}
     <div class="ni ${state.page==='audit'?'active':''}" data-page="audit">${I.audit}<span>Audit Log</span></div>
 
     <div class="sb-foot">
@@ -225,7 +241,7 @@ function renderHeader() {
             </div>`;
           }).join('')}
         </div>
-        <div style="padding:8px;border-top:1px solid var(--border-2)"><button class="btn btn-g btn-sm" style="width:100%" onclick="closeModal();openNewProject()">${I.plus}<span>New Project</span></button></div>
+        ${hasPermission('users') ? `<div style="padding:8px;border-top:1px solid var(--border-2)"><button class="btn btn-g btn-sm" style="width:100%" onclick="closeModal();openNewProject()">${I.plus}<span>New Project</span></button></div>` : ''}
       </div>
     </div>
     <div class="hdr-bc">
@@ -238,7 +254,7 @@ function renderHeader() {
       <span>ค้นหา Issues, Pages, คำสั่ง…</span>
       <kbd>⌘K</kbd>
     </div>
-    <button class="hdr-btn" title="Import CSV" onclick="triggerImportCSV()">${I.upload}</button>
+    ${hasPermission('import') ? `<button class="hdr-btn" title="Import CSV" onclick="triggerImportCSV()">${I.upload}</button>` : ''}
     <button class="hdr-btn" title="Export" onclick="exportData()">${I.download}</button>
     <div class="hdr-btn-wrap">
       <button class="hdr-btn" title="Notifications" onclick="toggleNotif(event)">${I.bell}<span class="dot"></span></button>
@@ -292,9 +308,9 @@ function renderDashboard() {
         <div class="page-sub">ภาพรวมประจำวันที่ <strong>29 เมษายน 2026</strong> · ${PROJECTS[state.projIdx].name} · ${PROJECTS[state.projIdx].phase}</div>
       </div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-g" onclick="triggerImportCSV()">${I.upload}<span>Import CSV</span></button>
+        ${hasPermission('import') ? `<button class="btn btn-g" onclick="triggerImportCSV()">${I.upload}<span>Import CSV</span></button>` : ''}
         <button class="btn btn-n" onclick="goPage('report')">${I.report}<span>Generate Report</span></button>
-        <button class="btn btn-p" onclick="openNewIssue()">${I.plus}<span>New Issue</span></button>
+        ${hasPermission('create') ? `<button class="btn btn-p" onclick="openNewIssue()">${I.plus}<span>New Issue</span></button>` : ''}
       </div>
     </div>
 
@@ -605,9 +621,9 @@ function renderIssues() {
         <div class="page-sub">รวม <strong>${getIss().length}</strong> issues · ${PROJECTS[state.projIdx].name} · ${PROJECTS[state.projIdx].phase}</div>
       </div>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-g" onclick="triggerImportCSV()">${I.upload}<span>Import CSV</span></button>
+        ${hasPermission('import') ? `<button class="btn btn-g" onclick="triggerImportCSV()">${I.upload}<span>Import CSV</span></button>` : ''}
         <button class="btn btn-g" onclick="exportIssuesCSV()">${I.download}<span>Export</span></button>
-        <button class="btn btn-p" onclick="openNewIssue()">${I.plus}<span>New Issue</span></button>
+        ${hasPermission('create') ? `<button class="btn btn-p" onclick="openNewIssue()">${I.plus}<span>New Issue</span></button>` : ''}
       </div>
     </div>
 
@@ -845,7 +861,7 @@ function renderProjects() {
         <h1 class="page-title">Projects</h1>
         <div class="page-sub">${PROJECTS.length} projects · <strong>${activeProjs}</strong> active · ${totalIssues} issues รวม</div>
       </div>
-      <button class="btn btn-p" onclick="openNewProject()">${I.plus}<span>New Project</span></button>
+      ${hasPermission('users') ? `<button class="btn btn-p" onclick="openNewProject()">${I.plus}<span>New Project</span></button>` : ''}
     </div>
 
     <!-- Summary cards -->
@@ -868,7 +884,7 @@ function renderProjects() {
 
     ${PROJECTS.length === 0 ? `<div class="card" style="padding:60px;text-align:center;color:var(--muted)">
       <div style="font-size:14px;margin-bottom:10px">ยังไม่มี project</div>
-      <button class="btn btn-p" onclick="openNewProject()">${I.plus}<span>สร้าง project แรก</span></button>
+      ${hasPermission('users') ? `<button class="btn btn-p" onclick="openNewProject()">${I.plus}<span>สร้าง project แรก</span></button>` : '<div style="font-size:12px;color:var(--muted)">ติดต่อ Admin เพื่อสร้าง project</div>'}
     </div>` : ''}
   </div>`;
 }
@@ -941,7 +957,7 @@ function renderUsers() {
   return `<div class="page">
     <div class="page-head">
       <div><h1 class="page-title">Users &amp; Roles</h1><div class="page-sub">ทีมที่เข้าถึงระบบ — ${USERS.length} คน</div></div>
-      <button class="btn btn-p" onclick="openInviteUser()">${I.plus}<span>Invite User</span></button>
+      ${hasPermission('users') ? `<button class="btn btn-p" onclick="openInviteUser()">${I.plus}<span>Invite User</span></button>` : ''}
     </div>
     <div class="card">
       <div style="display:grid;grid-template-columns:46px 1.4fr 1.6fr 120px 110px 80px;padding:12px 16px;border-bottom:1px solid var(--border-2);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700">
@@ -957,20 +973,17 @@ function renderUsers() {
       </div>`).join('')}
     </div>
     <div class="card" style="margin-top:14px">
-      <div class="card-h"><div><h3>Role Permissions</h3><div class="ch-sub">สิทธิ์การเข้าถึงตาม role</div></div></div>
+      <div class="card-h"><div><h3>Role Permissions</h3><div class="ch-sub">สิทธิ์การเข้าถึงตาม role (บังคับใช้จริง)</div></div></div>
       <div class="card-b">
         <table class="mini-tbl">
           <thead><tr><th>Role</th><th>Create</th><th>Edit</th><th>Delete</th><th>Import</th><th>Report</th><th>Users</th></tr></thead>
           <tbody>
-            ${[
-              ['Admin',[1,1,1,1,1,1]],
-              ['BIM Manager',[1,1,0,1,1,0]],
-              ['Coordinator',[0,1,0,0,1,0]],
-              ['Viewer',[0,0,0,0,1,0]]
-            ].map(([r,perms]) => `<tr>
-              <td><span class="badge ${roleColors[r]}">${r}</span></td>
-              ${perms.map(p => `<td style="color:${p?'#2DBE60':'#cbd5e1'};font-weight:700">${p?'✓':'—'}</td>`).join('')}
-            </tr>`).join('')}
+            ${VALID_ROLES.map(r => {
+              const p = PERMISSIONS[r] || {};
+              const cells = ['create','edit','delete','import','report','users']
+                .map(k => `<td style="color:${p[k]?'#2DBE60':'#cbd5e1'};font-weight:700">${p[k]?'✓':'—'}</td>`).join('');
+              return `<tr><td><span class="badge ${roleColors[r]}">${r}</span></td>${cells}</tr>`;
+            }).join('')}
           </tbody>
         </table>
       </div>
@@ -1386,14 +1399,16 @@ function openDetail(no) {
   // Find issue's audit timeline (filter by no)
   const tl = getAud().filter(a => a.issueNo === no);
   const imgData = getImg(no);
+  const canEdit = hasPermission('edit');
+  const canDelete = hasPermission('delete');
   const imgHtml = imgData
-    ? `<div class="so-img has-img" style="background-image:url('${imgData}')" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropImage(event,'${no}')">
-         <button class="so-img-remove" onclick="removeImage('${no}')" title="Remove image">${I.trash}</button>
-         <label class="so-img-upload">${I.image}<span>Replace</span><input type="file" accept="image/*" class="hide" onchange="uploadImage(event,'${no}')"/></label>
+    ? `<div class="so-img has-img" style="background-image:url('${imgData}')"${canEdit ? ` ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropImage(event,'${no}')"` : ''}>
+         ${canDelete ? `<button class="so-img-remove" onclick="removeImage('${no}')" title="Remove image">${I.trash}</button>` : ''}
+         ${canEdit ? `<label class="so-img-upload">${I.image}<span>Replace</span><input type="file" accept="image/*" class="hide" onchange="uploadImage(event,'${no}')"/></label>` : ''}
        </div>`
-    : `<div class="so-img" ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropImage(event,'${no}')">
-         <div class="so-img-txt"><strong>Viewpoint #${it.no}</strong>BIM Model · ${it.grid} · ${it.floor}<br/><span style="opacity:.65;font-size:10px;text-transform:none;letter-spacing:0">ลากรูปมาวาง หรือกดปุ่ม Upload</span></div>
-         <label class="so-img-upload">${I.upload}<span>Upload Image</span><input type="file" accept="image/*" class="hide" onchange="uploadImage(event,'${no}')"/></label>
+    : `<div class="so-img"${canEdit ? ` ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropImage(event,'${no}')"` : ''}>
+         <div class="so-img-txt"><strong>Viewpoint #${it.no}</strong>BIM Model · ${it.grid} · ${it.floor}<br/><span style="opacity:.65;font-size:10px;text-transform:none;letter-spacing:0">${canEdit ? 'ลากรูปมาวาง หรือกดปุ่ม Upload' : 'ยังไม่มีรูป'}</span></div>
+         ${canEdit ? `<label class="so-img-upload">${I.upload}<span>Upload Image</span><input type="file" accept="image/*" class="hide" onchange="uploadImage(event,'${no}')"/></label>` : ''}
        </div>`;
 
   $so.innerHTML = `
@@ -1437,9 +1452,10 @@ function openDetail(no) {
       </div>
 
       <div style="display:flex;gap:8px;margin-top:18px;flex-wrap:wrap">
-        <button class="btn btn-p" style="flex:1" onclick="openEditIssue('${it.no}')">${I.edit}<span>Edit</span></button>
-        <button class="btn btn-g" style="flex:1" onclick="markResolved('${it.no}')">${I.check2}<span>${it.status==='RESOLVED'?'Reopen':'Mark Resolved'}</span></button>
-        <button class="btn btn-d" onclick="confirmDeleteIssue('${it.no}')" title="Delete">${I.trash}</button>
+        ${canEdit ? `<button class="btn btn-p" style="flex:1" onclick="openEditIssue('${it.no}')">${I.edit}<span>Edit</span></button>` : ''}
+        ${canEdit ? `<button class="btn btn-g" style="flex:1" onclick="markResolved('${it.no}')">${I.check2}<span>${it.status==='RESOLVED'?'Reopen':'Mark Resolved'}</span></button>` : ''}
+        ${canDelete ? `<button class="btn btn-d" onclick="confirmDeleteIssue('${it.no}')" title="Delete">${I.trash}</button>` : ''}
+        ${!canEdit && !canDelete ? `<div style="flex:1;text-align:center;color:var(--muted);font-size:12px;padding:10px">🔒 ดูอย่างเดียว — role ${state.user.role}</div>` : ''}
       </div>
     </div>`;
   $so.classList.add('open');
@@ -1475,6 +1491,11 @@ function closeDetail() {
 
 // ===== Actions =====
 function goPage(p) {
+  // Block direct navigation to admin-only pages
+  if (p === 'users' && !hasPermission('users')) {
+    toast(`🚫 หน้านี้สำหรับ Admin เท่านั้น (role: ${state.user.role})`, '#dc2626');
+    return;
+  }
   state.page = p;
   state.selected.clear();
   render();
@@ -1507,6 +1528,7 @@ function clearSelection() {
   render();
 }
 function quickField(no, field, val) {
+  if (!requirePermission('edit', 'แก้ไข issue')) return;
   const it = getIss().find(i => i.no === no);
   if (!it) return;
   const old = it[field];
@@ -1519,6 +1541,7 @@ function quickField(no, field, val) {
   window.scrollTo(0, y);
 }
 function bulkUpdate(field, val) {
+  if (!requirePermission('edit', 'แก้ไข issues')) return;
   if (!val) return;
   state.selected.forEach(no => {
     const it = getIss().find(i => i.no === no);
@@ -1532,6 +1555,7 @@ function bulkUpdate(field, val) {
   render();
 }
 function bulkDelete() {
+  if (!requirePermission('delete', 'ลบ issues')) return;
   const n = state.selected.size;
   state.selected.forEach(no => {
     const idx = getIss().findIndex(i => i.no === no);
@@ -1692,17 +1716,6 @@ async function handleAuthStateChange(firebaseUser) {
   // Hide auth gate
   if (gate) gate.style.display = 'none';
 
-  // Set state.user from Firebase Auth
-  const displayName = firebaseUser.displayName || firebaseUser.email.split('@')[0];
-  state.user = {
-    id: 0,
-    name: displayName,
-    email: firebaseUser.email,
-    role: 'BIM Coordinator',
-    avatar: firebaseUser.photoURL || null,
-    lastActive: 'just now'
-  };
-
   // Load PROJECTS + USERS from Firebase (or seed from data.js on first run)
   try {
     const cloudProjects = await fbLoadProjects();
@@ -1725,6 +1738,41 @@ async function handleAuthStateChange(firebaseUser) {
     console.warn('Cloud sync (projects/users):', e);
   }
 
+  // ─── Resolve role: lookup USERS by email, auto-add if new ──────────
+  const displayName = firebaseUser.displayName || firebaseUser.email.split('@')[0];
+  let userRecord = USERS.find(u => (u.email || '').toLowerCase() === firebaseUser.email.toLowerCase());
+  if (!userRecord) {
+    // First time signing in — add as DEFAULT_ROLE (Viewer)
+    const nextId = USERS.reduce((m, u) => Math.max(m, u.id || 0), 0) + 1;
+    userRecord = {
+      id: nextId,
+      name: displayName,
+      email: firebaseUser.email,
+      role: DEFAULT_ROLE,
+      lastActive: 'just now'
+    };
+    USERS.push(userRecord);
+    fbSaveUsers(USERS).catch(e => console.warn('Auto-add user:', e));
+    toast(`👋 ยินดีต้อนรับ ${displayName} — ได้รับสิทธิ์ ${DEFAULT_ROLE}`, '#3A6EA5');
+  } else {
+    // Existing user — refresh displayName from provider (in case it changed)
+    if (firebaseUser.displayName && userRecord.name !== firebaseUser.displayName) {
+      userRecord.name = firebaseUser.displayName;
+    }
+    userRecord.lastActive = 'just now';
+    fbSaveUsers(USERS).catch(() => {});
+  }
+
+  // Set state.user — role comes from USERS record (not hardcoded)
+  state.user = {
+    id: userRecord.id,
+    name: userRecord.name,
+    email: userRecord.email,
+    role: userRecord.role,
+    avatar: firebaseUser.photoURL || null,
+    lastActive: 'just now'
+  };
+
   // ─── Real-time listeners for global PROJECTS + USERS ───
   fbSubscribeProjects((projects) => {
     if (projects.length === 0) return;
@@ -1737,6 +1785,17 @@ async function handleAuthStateChange(firebaseUser) {
     if (users.length === 0) return;
     USERS.length = 0;
     users.forEach(u => USERS.push(u));
+    // Re-sync current user's role if it was changed by an admin
+    if (state.user && state.user.email) {
+      const me = USERS.find(u => (u.email || '').toLowerCase() === state.user.email.toLowerCase());
+      if (me && me.role !== state.user.role) {
+        const oldRole = state.user.role;
+        state.user.role = me.role;
+        toast(`🔄 สิทธิ์ของคุณเปลี่ยนเป็น ${me.role} (เดิม ${oldRole})`, '#3A6EA5');
+        render();
+        return;
+      }
+    }
     if (state.page === 'users') render();
   });
 
@@ -1911,6 +1970,7 @@ async function _handleImageFile(file, no) {
   }
 }
 async function uploadImage(event, no) {
+  if (!requirePermission('edit', 'อัปโหลดรูป')) return;
   const file = event.target.files && event.target.files[0];
   if (!file) return;
   await _handleImageFile(file, no);
@@ -1918,11 +1978,13 @@ async function uploadImage(event, no) {
 async function dropImage(event, no) {
   event.preventDefault();
   event.currentTarget.classList.remove('drag-over');
+  if (!requirePermission('edit', 'อัปโหลดรูป')) return;
   const file = event.dataTransfer.files && event.dataTransfer.files[0];
   if (!file) return;
   await _handleImageFile(file, no);
 }
 function removeImage(no) {
+  if (!requirePermission('delete', 'ลบรูป')) return;
   if (!confirm(`ลบรูปของ Issue #${no}?`)) return;
   delImg(no);
   persistImgs();
@@ -2072,6 +2134,7 @@ function toggleReportSection(key) {
 
 // ============== CSV Import / Export ==============
 function triggerImportCSV() {
+  if (!requirePermission('import', 'นำเข้า CSV')) return;
   $('#csv-input').value = '';
   $('#csv-input').click();
 }
@@ -2541,6 +2604,7 @@ function exportAnalytics() {
 
 // ============== New Issue / Edit / Delete ==============
 function openNewIssue() {
+  if (!requirePermission('create', 'สร้าง issue ใหม่')) return;
   openModal(`
     <div class="modal">
       <div class="modal-h"><h3>New Issue</h3><button class="so-close" onclick="closeModal()">${I.close}</button></div>
@@ -2578,6 +2642,7 @@ function openNewIssue() {
     </div>`);
 }
 function saveNewIssue() {
+  if (!requirePermission('create', 'สร้าง issue ใหม่')) return;
   const title = $('#ni-title').value.trim();
   if (!title) { toast('⚠️ ใส่ title ก่อน', '#d97706'); return; }
   const disc = $('#ni-disc').value;
@@ -2613,6 +2678,7 @@ function saveNewIssue() {
   render();
 }
 function openEditIssue(no) {
+  if (!requirePermission('edit', 'แก้ไข issue')) return;
   const it = getIss().find(i => i.no === no);
   if (!it) return;
   openModal(`
@@ -2645,6 +2711,7 @@ function openEditIssue(no) {
     </div>`);
 }
 function saveEditIssue(no) {
+  if (!requirePermission('edit', 'แก้ไข issue')) return;
   const it = getIss().find(i => i.no === no);
   if (!it) return;
   it.title = $('#ed-title').value;
@@ -2661,6 +2728,7 @@ function saveEditIssue(no) {
   openDetail(no);
 }
 function markResolved(no) {
+  if (!requirePermission('edit', 'เปลี่ยนสถานะ')) return;
   const it = getIss().find(i => i.no === no);
   if (!it) return;
   const wasResolved = it.status === 'RESOLVED';
@@ -2680,6 +2748,7 @@ function markResolved(no) {
   openDetail(no);
 }
 function confirmDeleteIssue(no) {
+  if (!requirePermission('delete', 'ลบ issue')) return;
   if (!confirm(`ลบ Issue #${no} ?\nการกระทำนี้ย้อนกลับไม่ได้`)) return;
   const idx = getIss().findIndex(i => i.no === no);
   if (idx >= 0) {
@@ -2703,6 +2772,7 @@ function confirmDeleteIssue(no) {
 
 // ============== New Project ==============
 function openNewProject() {
+  if (!requirePermission('users', 'จัดการ project')) return;
   openModal(`
     <div class="modal">
       <div class="modal-h"><h3>New Project</h3><button class="so-close" onclick="closeModal()">${I.close}</button></div>
@@ -2729,6 +2799,7 @@ function openNewProject() {
     </div>`);
 }
 function saveNewProject() {
+  if (!requirePermission('users', 'สร้าง project')) return;
   const name = $('#np-name').value.trim();
   const code = $('#np-code').value.trim();
   if (!name || !code) { toast('⚠️ ใส่ name + code ก่อน', '#d97706'); return; }
@@ -2762,6 +2833,7 @@ function saveNewProject() {
 
 // ============== Edit Project ==============
 function openEditProject(i) {
+  if (!requirePermission('users', 'แก้ไข project')) return;
   const p = PROJECTS[i];
   if (!p) return;
   openModal(`
@@ -2818,6 +2890,7 @@ function saveEditProject(i) {
   render();
 }
 function confirmDeleteProject(i) {
+  if (!requirePermission('users', 'ลบ project')) return;
   const p = PROJECTS[i];
   if (!p) return;
   if (PROJECTS.length <= 1) {
@@ -2887,6 +2960,7 @@ function reindexProjects(deletedIdx) {
   persistImgs();
 }
 function duplicateProject(i) {
+  if (!requirePermission('users', 'duplicate project')) return;
   const p = PROJECTS[i];
   if (!p) return;
   const newId = PROJECTS.length;
@@ -2924,6 +2998,7 @@ function toggleProjActions(e, i) {
 
 // ============== Invite User ==============
 function openInviteUser() {
+  if (!requirePermission('users', 'เพิ่มผู้ใช้')) return;
   openModal(`
     <div class="modal">
       <div class="modal-h"><h3>Invite User</h3><button class="so-close" onclick="closeModal()">${I.close}</button></div>
@@ -2947,6 +3022,7 @@ function openInviteUser() {
     </div>`);
 }
 function saveInviteUser() {
+  if (!requirePermission('users', 'เพิ่มผู้ใช้')) return;
   const name = $('#iu-name').value.trim();
   const email = $('#iu-email').value.trim();
   if (!name || !email) { toast('⚠️ ใส่ name + email ก่อน', '#d97706'); return; }
@@ -2964,6 +3040,7 @@ function saveInviteUser() {
 
 // ============== Edit / Delete User ==============
 function openEditUser(id) {
+  if (!requirePermission('users', 'แก้ไขผู้ใช้')) return;
   const u = USERS.find(x => x.id === id);
   if (!u) return;
   const roleColors = { 'Admin':'b-critical', 'BIM Manager':'b-new', 'Coordinator':'b-active', 'Viewer':'b-unknown' };
@@ -2999,6 +3076,7 @@ function openEditUser(id) {
 }
 
 function saveUserEdit(id) {
+  if (!requirePermission('users', 'แก้ไขผู้ใช้')) return;
   const u = USERS.find(x => x.id === id);
   if (!u) return;
   const name  = $('#eu-name').value.trim();
@@ -3024,6 +3102,7 @@ function saveUserEdit(id) {
 }
 
 function confirmDeleteUser(id) {
+  if (!requirePermission('users', 'ลบผู้ใช้')) return;
   const u = USERS.find(x => x.id === id);
   if (!u) return;
   if (!confirm(`ลบผู้ใช้ "${u.name}" ?\nการกระทำนี้ย้อนกลับไม่ได้`)) return;
