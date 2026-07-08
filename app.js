@@ -1685,7 +1685,7 @@ function showAuthGate() {
 // ===== Access control =====
 // Restrict app to TEAM·CM domain only. Edit these lists to manage access.
 const ALLOWED_DOMAINS = ['teamcm.co.th'];
-const ADMIN_EMAILS    = ['nitid.korit@gmail.com']; // temporary admin override
+const ADMIN_EMAILS    = ['team_tcm001@teamgstart.com']; // temporary admin override
 
 function isAllowedEmail(email) {
   if (!email) return false;
