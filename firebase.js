@@ -126,7 +126,26 @@ async function fbLoadUsers() {
 async function fbSaveUsers(users) {
   const data = {};
   users.forEach(u => { data[String(u.id)] = u; });
-  return fbDb.ref('users').set(data);
+  return Promise.all([
+    fbDb.ref('users').set(data),
+    fbSyncClientAccess(users)
+  ]);
+}
+
+/**
+ * Mirrors {uid: projectCode} for every project-scoped user (Client Reviewer) into
+ * client_access/ — keyed by Firebase Auth uid (not email, which needs awkward
+ * dot-encoding to be a valid RTDB key). Security Rules read this node to decide
+ * whether a signed-in user may see a given project's issues/audit, since rules
+ * can't otherwise look up "what project does this user belong to".
+ * Internal staff (no projectCode) are simply absent from this node.
+ */
+async function fbSyncClientAccess(users) {
+  const data = {};
+  users.forEach(u => {
+    if (u.uid && u.projectCode) data[u.uid] = u.projectCode;
+  });
+  return fbDb.ref('client_access').set(data);
 }
 
 // ─── Real-time listeners (auto-sync across devices) ──────────────────

@@ -1810,6 +1810,7 @@ async function handleAuthStateChange(firebaseUser) {
       id: nextId,
       name: displayName,
       email: firebaseUser.email,
+      uid: firebaseUser.uid,
       role: clientProject ? DEFAULT_CLIENT_ROLE : DEFAULT_ROLE,
       projectCode: clientProject ? clientProject.code : null,
       lastActive: 'just now'
@@ -1824,6 +1825,8 @@ async function handleAuthStateChange(firebaseUser) {
     if (firebaseUser.displayName && userRecord.name !== firebaseUser.displayName) {
       userRecord.name = firebaseUser.displayName;
     }
+    // Backfill uid for users who signed in before this field existed.
+    if (!userRecord.uid) userRecord.uid = firebaseUser.uid;
     userRecord.lastActive = 'just now';
     fbSaveUsers(USERS).catch(() => {});
   }
