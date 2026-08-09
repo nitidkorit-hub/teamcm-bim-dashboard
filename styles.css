@@ -404,6 +404,7 @@ input,select,textarea{font-family:inherit}
 .b-st{background:#e2e8f0;color:#475569}
 .b-la{background:#d1fae5;color:#047857}
 .b-in{background:#fce7f3;color:#be185d}
+.b-owner{background:#e0e7ff;color:#4338ca}
 .disc-list{display:flex;gap:4px;flex-wrap:wrap}
 
 /* ===== Issues Table page ===== */
@@ -577,6 +578,7 @@ input,select,textarea{font-family:inherit}
 
 .so-section-h{font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px;font-weight:700;margin:14px 0 8px;display:flex;align-items:center;gap:8px}
 .so-section-h::after{content:'';flex:1;height:1px;background:var(--border-2)}
+.so-section-h svg{width:15px;height:15px;flex-shrink:0}
 
 .comment-box{background:#f7faff;border:1px solid var(--border-2);border-radius:8px;padding:11px 13px;font-size:13px;line-height:1.55;color:#1a2540}
 .timeline{display:flex;flex-direction:column;gap:11px;padding-left:6px;border-left:2px solid var(--border-2);margin-left:5px}

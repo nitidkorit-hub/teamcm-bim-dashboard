@@ -72,7 +72,7 @@ const I = {
 };
 
 // Discipline color lookup
-const DISC_COLOR = { AC:'#0ea5e9', EE:'#f59e0b', AR:'#8b5cf6', SN:'#06b6d4', FP:'#ef4444', ST:'#64748b', LA:'#10b981', IN:'#ec4899' };
+const DISC_COLOR = { AC:'#0ea5e9', EE:'#f59e0b', AR:'#8b5cf6', SN:'#06b6d4', FP:'#ef4444', ST:'#64748b', LA:'#10b981', IN:'#ec4899', OWNER:'#4338ca' };
 const STATUS_COLOR = { RESOLVED:'#2DBE60', ACTIVE:'#3A6EA5', NEW:'#9333ea', Unknown:'#94a3b8' };
 const PRIO_COLOR = { Critical:'#dc2626', Major:'#ea7f00', Minor:'#6b7280' };
 
@@ -307,6 +307,10 @@ function renderDashboard() {
   // Recent issues (last 8 by createdAt)
   const recent = [...all].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).slice(0,7);
 
+  // Issues waiting on the project owner — surfaced up top since it's usually what a Client Reviewer opens the dashboard for
+  const ownerIssues = all.filter(i => discArray(i.disc).includes('OWNER'));
+  const ownerOpen = ownerIssues.filter(i => i.status !== 'RESOLVED').length;
+
   return `<div class="page">
 
     <div class="page-head">
@@ -320,6 +324,18 @@ function renderDashboard() {
         ${hasPermission('create') ? `<button class="btn btn-p" onclick="openNewIssue()">${I.plus}<span>New Issue</span></button>` : ''}
       </div>
     </div>
+
+    ${ownerIssues.length > 0 ? `
+    <div onclick="showOwnerBlockedIssues()" style="cursor:pointer;display:flex;align-items:center;gap:14px;background:linear-gradient(90deg,#eef1ff,#e0e5ff);border:1.5px solid #c7d2fe;border-radius:10px;padding:14px 18px;margin-bottom:18px">
+      <div style="width:38px;height:38px;border-radius:9px;background:#4338ca;color:#fff;display:grid;place-items:center;flex-shrink:0">
+        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01"/><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg>
+      </div>
+      <div style="flex:1">
+        <div style="font-weight:700;font-size:14.5px;color:#3730a3;font-family:Montserrat">ติดอยู่ที่ Owner ${ownerOpen} รายการ</div>
+        <div style="font-size:12px;color:#4f46e5;margin-top:1px">รอการตัดสินใจ/อนุมัติจากเจ้าของโครงการ — จากทั้งหมด ${ownerIssues.length} รายการที่แท็ก Owner</div>
+      </div>
+      <span style="font-size:12px;font-weight:700;color:#4338ca;white-space:nowrap">ดูทั้งหมด →</span>
+    </div>` : ''}
 
     <!-- KPI strip -->
     <div class="kpi-grid">
@@ -546,7 +562,7 @@ function burndownSVG(data) {
 
 // ===== Heatmap =====
 function heatmap() {
-  const discs = ['EE','AC','AR','SN','FP','ST','LA','IN'];
+  const discs = VALID_DISC_CODES;
   const zones = ['ZONE 1','ZONE 2'];
   // count per disc x zone (only primary disc)
   const grid = {};
@@ -640,10 +656,11 @@ function renderIssues() {
         <button class="fchip ${f.status==='NEW'?'active':''}" onclick="setFilter('status','NEW')">NEW <span class="fch-n">${stTally.NEW||0}</span></button>
         <button class="fchip ${f.status==='ACTIVE'?'active':''}" onclick="setFilter('status','ACTIVE')">ACTIVE <span class="fch-n">${stTally.ACTIVE||0}</span></button>
         <button class="fchip ${f.status==='RESOLVED'?'active':''}" onclick="setFilter('status','RESOLVED')">RESOLVED <span class="fch-n">${stTally.RESOLVED||0}</span></button>
+        ${(() => { const oc = getIss().filter(i => discArray(i.disc).includes('OWNER')).length; return oc > 0 ? `<button class="fchip ${f.disc==='OWNER'?'active':''}" style="background:#4338ca;color:#fff;border-color:#4338ca" onclick="showOwnerBlockedIssues()">Owner-blocked <span class="fch-n" style="background:rgba(255,255,255,.25);color:#fff">${oc}</span></button>` : ''; })()}
       </div>
       <select class="fsel" onchange="setFilter('disc', this.value)">
         <option value="all" ${f.disc==='all'?'selected':''}>All Disciplines</option>
-        ${['EE','AC','AR','SN','FP','ST','LA','IN'].map(d => `<option ${f.disc===d?'selected':''}>${d}</option>`).join('')}
+        ${VALID_DISC_CODES.map(d => `<option ${f.disc===d?'selected':''}>${d}</option>`).join('')}
       </select>
       <select class="fsel" onchange="setFilter('prio', this.value)">
         <option value="all" ${f.prio==='all'?'selected':''}>All Priority</option>
@@ -1332,7 +1349,7 @@ function reportIssueCard(it, showComment) {
 
 // Heatmap for a filtered subset (for report preview / PDF)
 function heatmapForIssues(arr) {
-  const discs = ['EE','AC','AR','SN','FP','ST','LA','IN'];
+  const discs = VALID_DISC_CODES;
   const zones = ['ZONE 1','ZONE 2'];
   const grid = {};
   let max = 0;
@@ -1553,6 +1570,12 @@ function setFilter(key, val) {
   state.filters[key] = val;
   state.pageNum = 1;
   if (state.page === 'issues') render();
+}
+/** Jumps to Issues filtered to whatever's tagged OWNER — the "what's stuck on the owner" quick view. */
+function showOwnerBlockedIssues() {
+  state.filters = { status:'all', disc:'OWNER', prio:'all', zone:'all', q:'' };
+  state.pageNum = 1;
+  goPage('issues');
 }
 function goPageNum(n) {
   state.pageNum = n;
@@ -2143,7 +2166,8 @@ function renderDiscMultiSelect() {
     { key:'SN', label:'SN — Sanitary' },
     { key:'FP', label:'FP — Fire Protection' },
     { key:'LA', label:'LA — Landscape' },
-    { key:'IN', label:'IN — Interior' }
+    { key:'IN', label:'IN — Interior' },
+    { key:'OWNER', label:'OWNER — รอการตัดสินใจจากเจ้าของโครงการ' }
   ];
   const selected = state.reportOpts.disciplines;
   const trigger = selected.length === 0
@@ -2289,7 +2313,7 @@ async function extractZipToImgMap(arrayBuffer, imgMap) {
 }
 
 // Valid TEAM·CM discipline codes
-const VALID_DISC_CODES = ['EE','AC','AR','SN','FP','ST','LA','IN'];
+const VALID_DISC_CODES = ['EE','AC','AR','SN','FP','ST','LA','IN','OWNER'];
 
 // Extract discipline from TEAM·CM title pattern: {runNo}_{issNo}_{date}_{zone}_{disc}_...
 function extractDiscFromTitle(title) {
@@ -2692,7 +2716,7 @@ function openNewIssue() {
         <div class="form-row"><label>Title *</label><input type="text" id="ni-title" placeholder="เช่น แนวท่อ EE ชนคานหลัก กริด A-2 ชั้น 5F" /></div>
         <div class="form-row-grid">
           <div class="form-row"><label>Discipline</label>
-            <select id="ni-disc">${['EE','AC','AR','SN','FP','ST','LA','IN'].map(d => `<option>${d}</option>`).join('')}</select>
+            <select id="ni-disc">${VALID_DISC_CODES.map(d => `<option>${d}</option>`).join('')}</select>
           </div>
           <div class="form-row"><label>Zone</label>
             <select id="ni-zone"><option>ZONE 1</option><option>ZONE 2</option></select>
@@ -2711,7 +2735,7 @@ function openNewIssue() {
           <div class="form-row"><label>Floor</label><input type="text" id="ni-floor" placeholder="5F" /></div>
         </div>
         <div class="form-row"><label>Assignee</label>
-          <select id="ni-assignee"><option>EE Team</option><option>AC Team</option><option>AR Team</option><option>SN Team</option><option>FP Team</option><option>ST Team</option><option>MEP Lead</option><option>Site Eng.</option></select>
+          <select id="ni-assignee"><option>EE Team</option><option>AC Team</option><option>AR Team</option><option>SN Team</option><option>FP Team</option><option>ST Team</option><option>MEP Lead</option><option>Site Eng.</option><option>Owner</option></select>
         </div>
         <div class="form-row"><label>Comment / Instruction</label><textarea id="ni-comment" placeholder="คำสั่ง / คำอธิบายเพิ่มเติม"></textarea></div>
       </div>
@@ -2768,7 +2792,7 @@ function openEditIssue(no) {
         <div class="form-row"><label>Title</label><input type="text" id="ed-title" value="${esc(it.title)}" /></div>
         <div class="form-row-grid">
           <div class="form-row"><label>Discipline</label>
-            <select id="ed-disc">${['EE','AC','AR','SN','FP','ST','LA','IN'].map(d => `<option ${it.discPrimary===d?'selected':''}>${d}</option>`).join('')}</select>
+            <select id="ed-disc">${VALID_DISC_CODES.map(d => `<option ${it.discPrimary===d?'selected':''}>${d}</option>`).join('')}</select>
           </div>
           <div class="form-row"><label>Zone</label>
             <select id="ed-zone"><option ${it.zone==='ZONE 1'?'selected':''}>ZONE 1</option><option ${it.zone==='ZONE 2'?'selected':''}>ZONE 2</option></select>
@@ -3291,7 +3315,7 @@ function openAdvancedFilter() {
           <div class="form-row"><label>Discipline</label>
             <select id="af-disc">
               <option value="all">All</option>
-              ${['EE','AC','AR','SN','FP','ST','LA','IN'].map(d => `<option ${f.disc===d?'selected':''}>${d}</option>`).join('')}
+              ${VALID_DISC_CODES.map(d => `<option ${f.disc===d?'selected':''}>${d}</option>`).join('')}
             </select>
           </div>
           <div class="form-row"><label>Zone</label>
@@ -3532,7 +3556,7 @@ async function switchProject(idx) {
 // ============== Expose ==============
 Object.assign(window, {
   goPage, setFilter, goPageNum, toggleRow, toggleSelectAll, clearSelection,
-  quickField, bulkUpdate, bulkDelete, openDetail, closeDetail, submitComment,
+  quickField, bulkUpdate, bulkDelete, openDetail, closeDetail, submitComment, showOwnerBlockedIssues,
   toggleTheme, uploadImage, dropImage, removeImage,
   triggerImportCSV, exportData, exportIssuesCSV, exportSelected, exportAuditLog, exportAnalytics,
   openNewIssue, saveNewIssue, openEditIssue, saveEditIssue, markResolved, confirmDeleteIssue,
