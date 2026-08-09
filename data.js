@@ -4,8 +4,8 @@
    - EE:69, AC:19, AR:17, SN:15, FP:15, ST:7, LA:2, IN:1 (=145)
 */
 const PROJECTS = [
-  { id: 0, name: 'Sample Project A', code: 'DEMO-SAMPLE-A', desc: 'ตัวอย่างโปรเจค — สร้างโปรเจคของคุณเอง', active: true, phase: 'IFC50', status: 'Active' },
-  { id: 1, name: 'Sample Project B', code: 'DEMO-SAMPLE-B', desc: 'ตัวอย่างที่ 2 — Import CSV ของคุณได้เลย', active: false, phase: 'IFC42', status: 'On Hold' }
+  { id: 0, name: 'Sample Project A', code: 'DEMO-SAMPLE-A', desc: 'ตัวอย่างโปรเจค — สร้างโปรเจคของคุณเอง', active: true, phase: 'IFC50', status: 'Active', clientDomains: [], reportLogos: { owner: '', cm: '', contractor: '' } },
+  { id: 1, name: 'Sample Project B', code: 'DEMO-SAMPLE-B', desc: 'ตัวอย่างที่ 2 — Import CSV ของคุณได้เลย', active: false, phase: 'IFC42', status: 'On Hold', clientDomains: [], reportLogos: { owner: '', cm: '', contractor: '' } }
 ];
 
 // USERS list — populated from Firebase + auto-grows as new users sign in.
@@ -15,15 +15,18 @@ const USERS = [
 ];
 
 // ─── Role-based Permissions ──────────────────────────────────────────
-// Action keys: create, edit, delete, import, report, users (manage users)
+// Action keys: create, edit, delete, import, report, users (manage users), comment (leave feedback without edit rights)
 const PERMISSIONS = {
-  'Admin':       { create: true,  edit: true,  delete: true,  import: true,  report: true,  users: true  },
-  'BIM Manager': { create: true,  edit: true,  delete: false, import: true,  report: true,  users: false },
-  'Coordinator': { create: false, edit: true,  delete: false, import: false, report: true,  users: false },
-  'Viewer':      { create: false, edit: false, delete: false, import: false, report: true,  users: false }
+  'Admin':           { create: true,  edit: true,  delete: true,  import: true,  report: true,  users: true,  comment: true  },
+  'BIM Manager':     { create: true,  edit: true,  delete: false, import: true,  report: true,  users: false, comment: true  },
+  'Coordinator':     { create: false, edit: true,  delete: false, import: false, report: true,  users: false, comment: true  },
+  'Viewer':          { create: false, edit: false, delete: false, import: false, report: true,  users: false, comment: false },
+  // External — project owner / their team. Scoped to a single project via USERS[].projectCode.
+  'Client Reviewer': { create: false, edit: false, delete: false, import: false, report: true,  users: false, comment: true  }
 };
-const DEFAULT_ROLE = 'Viewer';   // role for first-time sign-ins
-const VALID_ROLES = ['Admin','BIM Manager','Coordinator','Viewer'];
+const DEFAULT_ROLE = 'Viewer';   // role for first-time @teamcm.co.th sign-ins
+const DEFAULT_CLIENT_ROLE = 'Client Reviewer'; // role for first-time sign-ins matching a project's clientDomains
+const VALID_ROLES = ['Admin','BIM Manager','Coordinator','Viewer','Client Reviewer'];
 
 const DISC_TITLES = {
   EE: [

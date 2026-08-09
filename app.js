@@ -22,6 +22,13 @@ const state = {
 };
 
 // ===== Project-scoped data accessors =====
+// Projects a Client Reviewer may see (their one assigned project); everyone else sees all.
+function getVisibleProjects() {
+  if (!state.user || !state.user.projectCode) return PROJECTS.map((p, i) => ({ p, i }));
+  return PROJECTS
+    .map((p, i) => ({ p, i }))
+    .filter(({ p }) => p.code === state.user.projectCode);
+}
 function getIss() { return PROJECT_ISSUES[state.projIdx] || PROJECT_ISSUES[0]; }
 function getAud() { return PROJECT_AUDIT[state.projIdx] || PROJECT_AUDIT[0]; }
 function imgKey(no) { return `p${state.projIdx}_${no}`; }
@@ -199,7 +206,7 @@ function renderSidebar() {
     <div class="sb-sec">Management</div>
     <div class="ni ${state.page==='projects'?'active':''}" data-page="projects">${I.projects}<span>Projects</span></div>
     ${hasPermission('users') ? `<div class="ni ${state.page==='users'?'active':''}" data-page="users">${I.users}<span>Users &amp; Roles</span></div>` : ''}
-    <div class="ni ${state.page==='audit'?'active':''}" data-page="audit">${I.audit}<span>Audit Log</span></div>
+    ${state.user.role !== 'Client Reviewer' ? `<div class="ni ${state.page==='audit'?'active':''}" data-page="audit">${I.audit}<span>Audit Log</span></div>` : ''}
 
     <div class="sb-foot">
       <div><span class="status-dot"></span> Synced • Firebase</div>
@@ -224,7 +231,7 @@ function renderHeader() {
           <span class="nh-mark" onclick="closeModal();goPage('projects')">Manage →</span>
         </div>
         <div class="notif-list">
-          ${PROJECTS.map((p, i) => {
+          ${getVisibleProjects().map(({p, i}) => {
             const count = (PROJECT_ISSUES[i] || []).length;
             const open = (PROJECT_ISSUES[i] || []).filter(x => x.status !== 'RESOLVED').length;
             const isCur = i === state.projIdx;
@@ -853,13 +860,15 @@ function projStatusBadge(status) {
 }
 
 function renderProjects() {
-  const totalIssues = Object.values(PROJECT_ISSUES).reduce((s,arr) => s + arr.length, 0);
-  const activeProjs = PROJECTS.filter(p => p.status === 'Active').length;
+  const vis = getVisibleProjects();
+  const visProjects = vis.map(({p}) => p);
+  const totalIssues = vis.reduce((s,{i}) => s + (PROJECT_ISSUES[i]||[]).length, 0);
+  const activeProjs = visProjects.filter(p => p.status === 'Active').length;
   return `<div class="page">
     <div class="page-head">
       <div>
         <h1 class="page-title">Projects</h1>
-        <div class="page-sub">${PROJECTS.length} projects · <strong>${activeProjs}</strong> active · ${totalIssues} issues รวม</div>
+        <div class="page-sub">${vis.length} projects · <strong>${activeProjs}</strong> active · ${totalIssues} issues รวม</div>
       </div>
       ${hasPermission('users') ? `<button class="btn btn-p" onclick="openNewProject()">${I.plus}<span>New Project</span></button>` : ''}
     </div>
@@ -867,10 +876,10 @@ function renderProjects() {
     <!-- Summary cards -->
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px">
       ${[
-        ['Total Projects', PROJECTS.length, 'k-blue'],
-        ['Active', PROJECTS.filter(p=>p.status==='Active').length, 'k-green'],
-        ['On Hold', PROJECTS.filter(p=>p.status==='On Hold').length, 'k-amber'],
-        ['Archived', PROJECTS.filter(p=>p.status==='Archived' || p.status==='Completed').length, 'k-purple']
+        ['Total Projects', vis.length, 'k-blue'],
+        ['Active', visProjects.filter(p=>p.status==='Active').length, 'k-green'],
+        ['On Hold', visProjects.filter(p=>p.status==='On Hold').length, 'k-amber'],
+        ['Archived', visProjects.filter(p=>p.status==='Archived' || p.status==='Completed').length, 'k-purple']
       ].map(([l,v,c]) => `<div class="kpi ${c}">
         <div class="kpi-lbl">${l}</div>
         <div class="kpi-val">${v}</div>
@@ -879,10 +888,10 @@ function renderProjects() {
 
     <!-- Project grid -->
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:14px">
-      ${PROJECTS.map((p,i) => projectCard(p, i)).join('')}
+      ${vis.map(({p,i}) => projectCard(p, i)).join('')}
     </div>
 
-    ${PROJECTS.length === 0 ? `<div class="card" style="padding:60px;text-align:center;color:var(--muted)">
+    ${vis.length === 0 ? `<div class="card" style="padding:60px;text-align:center;color:var(--muted)">
       <div style="font-size:14px;margin-bottom:10px">ยังไม่มี project</div>
       ${hasPermission('users') ? `<button class="btn btn-p" onclick="openNewProject()">${I.plus}<span>สร้าง project แรก</span></button>` : '<div style="font-size:12px;color:var(--muted)">ติดต่อ Admin เพื่อสร้าง project</div>'}
     </div>` : ''}
@@ -953,21 +962,22 @@ function projectCard(p, i) {
 }
 
 function renderUsers() {
-  const roleColors = { 'Admin':'b-critical', 'BIM Manager':'b-new', 'Coordinator':'b-active', 'Viewer':'b-unknown' };
+  const roleColors = { 'Admin':'b-critical', 'BIM Manager':'b-new', 'Coordinator':'b-active', 'Viewer':'b-unknown', 'Client Reviewer':'b-major' };
   return `<div class="page">
     <div class="page-head">
       <div><h1 class="page-title">Users &amp; Roles</h1><div class="page-sub">ทีมที่เข้าถึงระบบ — ${USERS.length} คน</div></div>
       ${hasPermission('users') ? `<button class="btn btn-p" onclick="openInviteUser()">${I.plus}<span>Invite User</span></button>` : ''}
     </div>
     <div class="card">
-      <div style="display:grid;grid-template-columns:46px 1.4fr 1.6fr 120px 110px 80px;padding:12px 16px;border-bottom:1px solid var(--border-2);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700">
-        <div></div><div>Name</div><div>Email</div><div>Role</div><div>Last Active</div><div></div>
+      <div style="display:grid;grid-template-columns:46px 1.3fr 1.5fr 120px 110px 90px 80px;padding:12px 16px;border-bottom:1px solid var(--border-2);font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700">
+        <div></div><div>Name</div><div>Email</div><div>Role</div><div>Scope</div><div>Last Active</div><div></div>
       </div>
-      ${USERS.map(u => `<div style="display:grid;grid-template-columns:46px 1.4fr 1.6fr 120px 110px 80px;padding:13px 16px;align-items:center;border-bottom:1px solid #f0f3f8;font-size:13px">
+      ${USERS.map(u => `<div style="display:grid;grid-template-columns:46px 1.3fr 1.5fr 120px 110px 90px 80px;padding:13px 16px;align-items:center;border-bottom:1px solid #f0f3f8;font-size:13px">
         <div><div class="user-avatar" style="width:32px;height:32px">${u.name.split(' ').map(n=>n[0]).join('').slice(0,2)}</div></div>
         <div style="font-weight:600;color:#1a2540">${esc(u.name)}</div>
         <div class="muted mono" style="font-size:12px">${esc(u.email)}</div>
         <div><span class="badge ${roleColors[u.role]}">${u.role}</span></div>
+        <div class="muted mono" style="font-size:11.5px">${u.projectCode ? esc(u.projectCode) : 'All'}</div>
         <div class="muted mono" style="font-size:11.5px">${esc(u.lastActive)}</div>
         <div><button class="t-row-btn" onclick="openEditUser(${u.id})" title="Edit user">${I.edit}</button></div>
       </div>`).join('')}
@@ -976,11 +986,11 @@ function renderUsers() {
       <div class="card-h"><div><h3>Role Permissions</h3><div class="ch-sub">สิทธิ์การเข้าถึงตาม role (บังคับใช้จริง)</div></div></div>
       <div class="card-b">
         <table class="mini-tbl">
-          <thead><tr><th>Role</th><th>Create</th><th>Edit</th><th>Delete</th><th>Import</th><th>Report</th><th>Users</th></tr></thead>
+          <thead><tr><th>Role</th><th>Create</th><th>Edit</th><th>Delete</th><th>Import</th><th>Comment</th><th>Report</th><th>Users</th></tr></thead>
           <tbody>
             ${VALID_ROLES.map(r => {
               const p = PERMISSIONS[r] || {};
-              const cells = ['create','edit','delete','import','report','users']
+              const cells = ['create','edit','delete','import','comment','report','users']
                 .map(k => `<td style="color:${p[k]?'#2DBE60':'#cbd5e1'};font-weight:700">${p[k]?'✓':'—'}</td>`).join('');
               return `<tr><td><span class="badge ${roleColors[r]}">${r}</span></td>${cells}</tr>`;
             }).join('')}
@@ -1094,7 +1104,7 @@ function renderReport() {
                 ['cards','Issue Cards with Viewpoints'],
                 ['comments','Comment History'],
                 ['audit','Audit Trail']
-              ].map(([k,s]) => `
+              ].filter(([k]) => k !== 'audit' || state.user.role !== 'Client Reviewer').map(([k,s]) => `
                 <label style="display:flex;align-items:center;gap:9px;padding:5px 0;font-size:13px;cursor:pointer" onclick="toggleReportSection('${k}')">
                   <span class="ck ${opts.sections.includes(k)?'checked':''}"></span>${s}
                 </label>`).join('')}
@@ -1143,6 +1153,8 @@ function renderReportContent(ctx) {
 
   // --- Cover Page ---
   if (showSection('cover')) {
+    const logos = proj.reportLogos || {};
+    const logoItems = [['owner','Owner'],['cm','CM (TEAM·CM)'],['contractor','Contractor']].filter(([k]) => logos[k]);
     html += `<div class="rpt-page rpt-cover" style="${pageStyle};min-height:280px;display:flex;flex-direction:column">
       <div style="background:var(--navy);color:#fff;padding:24px 30px;border-bottom:4px solid var(--green);flex:1;display:flex;flex-direction:column;justify-content:space-between">
         <div>
@@ -1158,6 +1170,12 @@ function renderReportContent(ctx) {
           <div>${today} · TEAMCM HQ</div>
         </div>
       </div>
+      ${logoItems.length ? `<div style="background:#fff;padding:14px 30px;display:flex;align-items:center;justify-content:center;gap:36px;border-top:1px solid #e2e8f0">
+        ${logoItems.map(([k,label]) => `<div style="text-align:center">
+          <img src="${logos[k]}" style="height:38px;max-width:140px;object-fit:contain;display:block;margin:0 auto" />
+          <div style="font-size:8.5px;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;margin-top:4px;font-family:JetBrains Mono">${label}</div>
+        </div>`).join('')}
+      </div>` : ''}
     </div>`;
   }
 
@@ -1238,8 +1256,8 @@ function renderReportContent(ctx) {
     </div>`;
   }
 
-  // --- Audit Trail ---
-  if (showSection('audit')) {
+  // --- Audit Trail (internal-ops only — never shown to a Client Reviewer) ---
+  if (showSection('audit') && state.user.role !== 'Client Reviewer') {
     const aud = getAud();
     html += `<div class="rpt-page rpt-audit" style="${pageStyle}">
       <div style="padding:20px 26px">
@@ -1281,6 +1299,7 @@ function prioritySort(a, b) {
 
 function reportIssueCard(it, showComment) {
   const img = getImg(it.no);
+  const isClient = state.user.role === 'Client Reviewer';
   const imgBox = img
     ? `<div style="width:130px;aspect-ratio:4/3;border-radius:4px;overflow:hidden;background:#e7ecf3;flex-shrink:0"><img src="${img}" style="width:100%;height:100%;object-fit:cover;display:block" /></div>`
     : `<div style="width:130px;aspect-ratio:4/3;background:linear-gradient(135deg,#1e293b,#334155);border-radius:4px;display:grid;place-items:center;color:#64748b;font-size:9px;font-weight:600;letter-spacing:.5px;flex-shrink:0">VIEWPOINT<br/>#${it.no}</div>`;
@@ -1301,8 +1320,8 @@ function reportIssueCard(it, showComment) {
           <div><strong>Zone:</strong> ${esc(it.zone)}</div>
           <div><strong>Grid:</strong> ${esc(it.grid)}</div>
           <div><strong>Floor:</strong> ${esc(it.floor)}</div>
-          <div><strong>Author:</strong> ${esc(it.author)}</div>
-          <div><strong>Assignee:</strong> ${esc(it.assignee)}</div>
+          ${isClient ? '' : `<div><strong>Author:</strong> ${esc(it.author)}</div>`}
+          ${isClient ? '' : `<div><strong>Assignee:</strong> ${esc(it.assignee)}</div>`}
           <div><strong>Age:</strong> ${it.daysOpen} days</div>
         </div>
         ${showComment ? `<div style="margin-top:8px;padding:7px 10px;background:#f1f5f9;border-radius:4px;color:#334155"><strong>Comment:</strong> ${esc(it.comment)}</div>` : ''}
@@ -1401,6 +1420,7 @@ function openDetail(no) {
   const imgData = getImg(no);
   const canEdit = hasPermission('edit');
   const canDelete = hasPermission('delete');
+  const canComment = hasPermission('comment');
   const imgHtml = imgData
     ? `<div class="so-img has-img" style="background-image:url('${imgData}')"${canEdit ? ` ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropImage(event,'${no}')"` : ''}>
          ${canDelete ? `<button class="so-img-remove" onclick="removeImage('${no}')" title="Remove image">${I.trash}</button>` : ''}
@@ -1455,8 +1475,13 @@ function openDetail(no) {
         ${canEdit ? `<button class="btn btn-p" style="flex:1" onclick="openEditIssue('${it.no}')">${I.edit}<span>Edit</span></button>` : ''}
         ${canEdit ? `<button class="btn btn-g" style="flex:1" onclick="markResolved('${it.no}')">${I.check2}<span>${it.status==='RESOLVED'?'Reopen':'Mark Resolved'}</span></button>` : ''}
         ${canDelete ? `<button class="btn btn-d" onclick="confirmDeleteIssue('${it.no}')" title="Delete">${I.trash}</button>` : ''}
-        ${!canEdit && !canDelete ? `<div style="flex:1;text-align:center;color:var(--muted);font-size:12px;padding:10px">🔒 ดูอย่างเดียว — role ${state.user.role}</div>` : ''}
+        ${!canEdit && !canDelete && !canComment ? `<div style="flex:1;text-align:center;color:var(--muted);font-size:12px;padding:10px">🔒 ดูอย่างเดียว — role ${state.user.role}</div>` : ''}
       </div>
+      ${!canEdit && canComment ? `
+      <div class="so-section-h" style="margin-top:14px">${I.comment}<span>Add Comment</span></div>
+      <textarea id="so-new-comment" placeholder="เขียนความเห็น/สอบถามเกี่ยวกับ issue นี้…" style="width:100%;min-height:64px;resize:vertical;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-family:inherit;font-size:13px;background:var(--surface);color:var(--text);box-sizing:border-box"></textarea>
+      <button class="btn btn-p" style="width:100%;margin-top:8px" onclick="submitComment('${it.no}')">${I.comment}<span>Post Comment</span></button>
+      ` : ''}
     </div>`;
   $so.classList.add('open');
   $bd.classList.add('open');
@@ -1489,11 +1514,34 @@ function closeDetail() {
   $('#so').setAttribute('aria-hidden','true');
 }
 
+/** Comment-only feedback path for roles without edit rights (e.g. Client Reviewer). */
+function submitComment(no) {
+  if (!requirePermission('comment', 'คอมเมนต์')) return;
+  const ta = $('#so-new-comment');
+  const text = ta ? ta.value.trim() : '';
+  if (!text) { toast('⚠️ พิมพ์ข้อความก่อน', '#d97706'); return; }
+  const it = getIss().find(i => i.no === no);
+  const entry = {
+    ts: new Date().toLocaleDateString('en-GB').replace(/\//g,'/').slice(0,8) + ' ' + new Date().toTimeString().slice(0,5),
+    issueNo: no, issueTitle: it ? it.title : '',
+    action: 'Comment Added', field: 'comment', oldVal: '', newVal: text,
+    user: state.user.name
+  };
+  getAud().unshift(entry);
+  fbAddAudit(state.projIdx, entry).catch(() => {});
+  toast('✓ ส่งความเห็นแล้ว', '#2DBE60');
+  openDetail(no); // re-render the slide-over so the new entry shows in Activity
+}
+
 // ===== Actions =====
 function goPage(p) {
   // Block direct navigation to admin-only pages
   if (p === 'users' && !hasPermission('users')) {
     toast(`🚫 หน้านี้สำหรับ Admin เท่านั้น (role: ${state.user.role})`, '#dc2626');
+    return;
+  }
+  if (p === 'audit' && state.user.role === 'Client Reviewer') {
+    toast(`🚫 หน้านี้ไม่เปิดให้ Client Reviewer`, '#dc2626');
     return;
   }
   state.page = p;
@@ -1692,7 +1740,18 @@ function isAllowedEmail(email) {
   const e = email.toLowerCase().trim();
   if (ADMIN_EMAILS.map(x => x.toLowerCase()).includes(e)) return true;
   const domain = e.split('@')[1] || '';
-  return ALLOWED_DOMAINS.includes(domain);
+  if (ALLOWED_DOMAINS.includes(domain)) return true;
+  // Pre-invited individually by an Admin, regardless of email domain.
+  if (USERS.some(u => (u.email || '').toLowerCase() === e)) return true;
+  // Domain allow-listed on a project's client team (Projects → Edit → Client access).
+  if (PROJECTS.some(p => (p.clientDomains || []).map(d => d.toLowerCase()).includes(domain))) return true;
+  return false;
+}
+
+/** Finds the project whose clientDomains includes this email's domain, if any. */
+function findClientProjectForEmail(email) {
+  const domain = (email.split('@')[1] || '').toLowerCase();
+  return PROJECTS.find(p => (p.clientDomains || []).map(d => d.toLowerCase()).includes(domain)) || null;
 }
 
 async function handleAuthStateChange(firebaseUser) {
@@ -1742,18 +1801,24 @@ async function handleAuthStateChange(firebaseUser) {
   const displayName = firebaseUser.displayName || firebaseUser.email.split('@')[0];
   let userRecord = USERS.find(u => (u.email || '').toLowerCase() === firebaseUser.email.toLowerCase());
   if (!userRecord) {
-    // First time signing in — add as DEFAULT_ROLE (Viewer)
+    // First time signing in — internal domain gets DEFAULT_ROLE (Viewer);
+    // an email whose domain is allow-listed on a project's client team gets
+    // auto-provisioned as a Client Reviewer scoped to that one project.
+    const clientProject = findClientProjectForEmail(firebaseUser.email);
     const nextId = USERS.reduce((m, u) => Math.max(m, u.id || 0), 0) + 1;
     userRecord = {
       id: nextId,
       name: displayName,
       email: firebaseUser.email,
-      role: DEFAULT_ROLE,
+      role: clientProject ? DEFAULT_CLIENT_ROLE : DEFAULT_ROLE,
+      projectCode: clientProject ? clientProject.code : null,
       lastActive: 'just now'
     };
     USERS.push(userRecord);
     fbSaveUsers(USERS).catch(e => console.warn('Auto-add user:', e));
-    toast(`👋 ยินดีต้อนรับ ${displayName} — ได้รับสิทธิ์ ${DEFAULT_ROLE}`, '#3A6EA5');
+    toast(clientProject
+      ? `👋 ยินดีต้อนรับ ${displayName} — เข้าดูโครงการ ${clientProject.name} ในฐานะ ${DEFAULT_CLIENT_ROLE}`
+      : `👋 ยินดีต้อนรับ ${displayName} — ได้รับสิทธิ์ ${DEFAULT_ROLE}`, '#3A6EA5');
   } else {
     // Existing user — refresh displayName from provider (in case it changed)
     if (firebaseUser.displayName && userRecord.name !== firebaseUser.displayName) {
@@ -1769,9 +1834,15 @@ async function handleAuthStateChange(firebaseUser) {
     name: userRecord.name,
     email: userRecord.email,
     role: userRecord.role,
+    projectCode: userRecord.projectCode || null,
     avatar: firebaseUser.photoURL || null,
     lastActive: 'just now'
   };
+  // Scoped users land directly on their project, not whatever index 0 is.
+  if (state.user.projectCode) {
+    const scopedIdx = PROJECTS.findIndex(p => p.code === state.user.projectCode);
+    if (scopedIdx >= 0) state.projIdx = scopedIdx;
+  }
 
   // ─── Real-time listeners for global PROJECTS + USERS ───
   fbSubscribeProjects((projects) => {
@@ -1788,9 +1859,15 @@ async function handleAuthStateChange(firebaseUser) {
     // Re-sync current user's role if it was changed by an admin
     if (state.user && state.user.email) {
       const me = USERS.find(u => (u.email || '').toLowerCase() === state.user.email.toLowerCase());
-      if (me && me.role !== state.user.role) {
+      const meProjectCode = me ? (me.projectCode || null) : null;
+      if (me && (me.role !== state.user.role || meProjectCode !== state.user.projectCode)) {
         const oldRole = state.user.role;
         state.user.role = me.role;
+        state.user.projectCode = meProjectCode;
+        if (meProjectCode) {
+          const scopedIdx = PROJECTS.findIndex(p => p.code === meProjectCode);
+          if (scopedIdx >= 0) state.projIdx = scopedIdx;
+        }
         toast(`🔄 สิทธิ์ของคุณเปลี่ยนเป็น ${me.role} (เดิม ${oldRole})`, '#3A6EA5');
         render();
         return;
@@ -2812,7 +2889,9 @@ function saveNewProject() {
     desc: $('#np-desc').value,
     active: status === 'Active',
     phase: $('#np-phase').value || '—',
-    status
+    status,
+    clientDomains: [],
+    reportLogos: { owner: '', cm: '', contractor: '' }
   });
   PROJECT_ISSUES[newId] = [];
   PROJECT_AUDIT[newId] = [];
@@ -2832,10 +2911,21 @@ function saveNewProject() {
 }
 
 // ============== Edit Project ==============
+let _editProjectLogos = null;
 function openEditProject(i) {
   if (!requirePermission('users', 'แก้ไข project')) return;
   const p = PROJECTS[i];
   if (!p) return;
+  _editProjectLogos = { owner: (p.reportLogos&&p.reportLogos.owner)||'', cm: (p.reportLogos&&p.reportLogos.cm)||'', contractor: (p.reportLogos&&p.reportLogos.contractor)||'' };
+  const logoSlot = (key, label) => `
+    <div style="text-align:center">
+      <div style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600;margin-bottom:6px">${label}</div>
+      <label style="display:block;width:100%;aspect-ratio:16/9;border:1.5px dashed var(--border);border-radius:6px;cursor:pointer;overflow:hidden;background:var(--bg);position:relative">
+        <img id="ep-logo-${key}-img" src="${_editProjectLogos[key]||''}" style="width:100%;height:100%;object-fit:contain;display:${_editProjectLogos[key]?'block':'none'}"/>
+        <span id="ep-logo-${key}-ph" style="display:${_editProjectLogos[key]?'none':'flex'};position:absolute;inset:0;align-items:center;justify-content:center;font-size:10.5px;color:var(--muted)">+ Upload</span>
+        <input type="file" accept="image/*" class="hide" onchange="handleEditProjectLogo(event,'${key}')"/>
+      </label>
+    </div>`;
   openModal(`
     <div class="modal">
       <div class="modal-h"><h3>Edit Project · ${esc(p.name)}</h3><button class="so-close" onclick="closeModal()">${I.close}</button></div>
@@ -2851,6 +2941,18 @@ function openEditProject(i) {
             ${['Active','On Hold','Completed','Archived'].map(s => `<option ${p.status===s?'selected':''}>${s}</option>`).join('')}
           </select>
         </div>
+        <div class="form-row"><label>Client access — allowed email domain(s)</label>
+          <input type="text" id="ep-client-domains" value="${esc((p.clientDomains||[]).join(', '))}" placeholder="e.g. ananda.co.th, ananda-dev.com" />
+          <div style="font-size:11px;color:var(--muted);margin-top:4px">อีเมลโดเมนนี้จะล็อกอินเข้าได้เฉพาะโครงการนี้ ในฐานะ Client Reviewer (ดู + คอมเมนต์เท่านั้น) — เพิ่มทีละคนได้ที่หน้า Users แทน ถ้าไม่อยากเปิดทั้งโดเมน</div>
+        </div>
+        <div class="form-row">
+          <label>Report logos <span style="font-weight:400;color:var(--muted)">— แสดงบนหน้าปกรายงาน PDF</span></label>
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:6px">
+            ${logoSlot('owner','Owner')}
+            ${logoSlot('cm','CM (TEAM·CM)')}
+            ${logoSlot('contractor','Contractor')}
+          </div>
+        </div>
         <div style="background:var(--bg);border-radius:6px;padding:10px 12px;font-size:11.5px;color:var(--muted);display:flex;justify-content:space-between">
           <span>${(PROJECT_ISSUES[i]||[]).length} issues · ${(PROJECT_ISSUES[i]||[]).filter(x=>x.status!=='RESOLVED').length} open</span>
           <span>${(PROJECT_AUDIT[i]||[]).length} audit entries</span>
@@ -2864,6 +2966,22 @@ function openEditProject(i) {
       </div>
     </div>`);
 }
+async function handleEditProjectLogo(event, key) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  if (!file.type.startsWith('image/')) { toast('⚠️ ต้องเป็นไฟล์รูปภาพ', '#d97706'); return; }
+  try {
+    const data = await readImageAsDataURL(file, 480);
+    if (!_editProjectLogos) _editProjectLogos = { owner:'', cm:'', contractor:'' };
+    _editProjectLogos[key] = data;
+    const img = document.getElementById(`ep-logo-${key}-img`);
+    const ph = document.getElementById(`ep-logo-${key}-ph`);
+    if (img) { img.src = data; img.style.display = 'block'; }
+    if (ph) ph.style.display = 'none';
+  } catch (e) {
+    toast('❌ โหลดโลโก้ไม่สำเร็จ', '#dc2626');
+  }
+}
 function saveEditProject(i) {
   const p = PROJECTS[i];
   if (!p) return;
@@ -2874,6 +2992,8 @@ function saveEditProject(i) {
   p.desc = $('#ep-desc').value;
   p.status = $('#ep-status').value;
   p.active = p.status === 'Active';
+  p.clientDomains = ($('#ep-client-domains').value || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  if (_editProjectLogos) p.reportLogos = { ..._editProjectLogos };
   if (oldStatus !== p.status) {
     getAud().unshift({
       ts: '15/05/26 ' + new Date().toTimeString().slice(0,5),
@@ -3006,14 +3126,21 @@ function openInviteUser() {
         <div class="form-row"><label>Full Name *</label><input type="text" id="iu-name" placeholder="ชื่อ-นามสกุล" /></div>
         <div class="form-row"><label>Email *</label><input type="text" id="iu-email" placeholder="name@teamcm.co.th" /></div>
         <div class="form-row"><label>Role</label>
-          <select id="iu-role">
+          <select id="iu-role" onchange="document.getElementById('iu-project-row').style.display = this.value==='Client Reviewer' ? 'block' : 'none'">
             <option>Viewer</option>
             <option>Coordinator</option>
             <option>BIM Manager</option>
             <option>Admin</option>
+            <option>Client Reviewer</option>
           </select>
         </div>
-        <div style="font-size:12px;color:var(--muted);margin-top:4px">📧 ระบบจะส่งอีเมล invitation ไปยังผู้ใช้ใหม่</div>
+        <div class="form-row" id="iu-project-row" style="display:none">
+          <label>Project <span style="font-weight:400;color:var(--muted)">— Client Reviewer sees only this one</span></label>
+          <select id="iu-project">
+            ${PROJECTS.map(p => `<option value="${esc(p.code)}">${esc(p.name)} (${esc(p.code)})</option>`).join('')}
+          </select>
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px">📧 ระบบจะส่งอีเมล invitation ไปยังผู้ใช้ใหม่ · Client Reviewer ล็อกอินได้ด้วยอีเมลนี้แม้ไม่ใช่โดเมน @teamcm.co.th</div>
       </div>
       <div class="modal-f">
         <button class="btn btn-g" onclick="closeModal()">Cancel</button>
@@ -3026,10 +3153,14 @@ function saveInviteUser() {
   const name = $('#iu-name').value.trim();
   const email = $('#iu-email').value.trim();
   if (!name || !email) { toast('⚠️ ใส่ name + email ก่อน', '#d97706'); return; }
+  const role = $('#iu-role').value;
+  const projEl = $('#iu-project');
+  const projectCode = (role === 'Client Reviewer' && projEl) ? projEl.value : null;
   USERS.push({
     id: (USERS.reduce((m, u) => Math.max(m, u.id), 0) || 0) + 1,
     name, email,
-    role: $('#iu-role').value,
+    role,
+    projectCode,
     lastActive: 'invited'
   });
   fbSaveUsers(USERS).catch(e => console.warn('Firebase users:', e));
@@ -3043,7 +3174,7 @@ function openEditUser(id) {
   if (!requirePermission('users', 'แก้ไขผู้ใช้')) return;
   const u = USERS.find(x => x.id === id);
   if (!u) return;
-  const roleColors = { 'Admin':'b-critical', 'BIM Manager':'b-new', 'Coordinator':'b-active', 'Viewer':'b-unknown' };
+  const roleColors = { 'Admin':'b-critical', 'BIM Manager':'b-new', 'Coordinator':'b-active', 'Viewer':'b-unknown', 'Client Reviewer':'b-major' };
   openModal(`
     <div class="modal">
       <div class="modal-h"><h3>Edit User</h3><button class="so-close" onclick="closeModal()">${I.close}</button></div>
@@ -3059,8 +3190,14 @@ function openEditUser(id) {
         <div class="form-row"><label>Full Name *</label><input type="text" id="eu-name" value="${esc(u.name)}" /></div>
         <div class="form-row"><label>Email *</label><input type="text" id="eu-email" value="${esc(u.email)}" /></div>
         <div class="form-row"><label>Role *</label>
-          <select id="eu-role">
-            ${['Viewer','Coordinator','BIM Manager','Admin'].map(r => `<option ${u.role === r ? 'selected' : ''}>${r}</option>`).join('')}
+          <select id="eu-role" onchange="document.getElementById('eu-project-row').style.display = this.value==='Client Reviewer' ? 'block' : 'none'">
+            ${VALID_ROLES.map(r => `<option ${u.role === r ? 'selected' : ''}>${r}</option>`).join('')}
+          </select>
+        </div>
+        <div class="form-row" id="eu-project-row" style="display:${u.role==='Client Reviewer'?'block':'none'}">
+          <label>Project <span style="font-weight:400;color:var(--muted)">— Client Reviewer sees only this one</span></label>
+          <select id="eu-project">
+            ${PROJECTS.map(p => `<option value="${esc(p.code)}" ${u.projectCode===p.code?'selected':''}>${esc(p.name)} (${esc(p.code)})</option>`).join('')}
           </select>
         </div>
         <div style="font-size:11.5px;color:var(--muted);margin-top:4px">การเปลี่ยน role จะมีผลทันทีเมื่อบันทึก</div>
@@ -3082,9 +3219,11 @@ function saveUserEdit(id) {
   const name  = $('#eu-name').value.trim();
   const email = $('#eu-email').value.trim();
   const role  = $('#eu-role').value;
+  const projEl = $('#eu-project');
+  const projectCode = (role === 'Client Reviewer' && projEl) ? projEl.value : null;
   if (!name || !email) { toast('⚠️ Name + Email ห้ามว่าง', '#d97706'); return; }
   const oldRole = u.role;
-  u.name = name; u.email = email; u.role = role;
+  u.name = name; u.email = email; u.role = role; u.projectCode = projectCode;
   // Audit log entry
   if (oldRole !== role) {
     getAud().unshift({
@@ -3373,6 +3512,10 @@ function toggleProjMenu(e) {
 }
 async function switchProject(idx) {
   if (idx === state.projIdx) { toggleProjMenu(); return; }
+  if (state.user.projectCode && PROJECTS[idx] && PROJECTS[idx].code !== state.user.projectCode) {
+    toast('🚫 คุณไม่มีสิทธิ์เข้าโครงการนี้', '#dc2626');
+    return;
+  }
   state.projIdx = idx;
   state.selected.clear();
   state.pageNum = 1;
@@ -3386,7 +3529,7 @@ async function switchProject(idx) {
 // ============== Expose ==============
 Object.assign(window, {
   goPage, setFilter, goPageNum, toggleRow, toggleSelectAll, clearSelection,
-  quickField, bulkUpdate, bulkDelete, openDetail, closeDetail,
+  quickField, bulkUpdate, bulkDelete, openDetail, closeDetail, submitComment,
   toggleTheme, uploadImage, dropImage, removeImage,
   triggerImportCSV, exportData, exportIssuesCSV, exportSelected, exportAuditLog, exportAnalytics,
   openNewIssue, saveNewIssue, openEditIssue, saveEditIssue, markResolved, confirmDeleteIssue,
@@ -3398,7 +3541,7 @@ Object.assign(window, {
   discMSOpen, discMSToggle, discMSSetAll, discMSPreset, toggleReportSection,
   previewReport, generatePDF, downloadRecentReport,
   toggleProjMenu, switchProject,
-  openEditProject, saveEditProject, confirmDeleteProject, duplicateProject, toggleProjActions,
+  openEditProject, saveEditProject, confirmDeleteProject, duplicateProject, toggleProjActions, handleEditProjectLogo,
   // Firebase Auth
   fbSignIn, fbSignInMicrosoft, fbSignOut
 });
