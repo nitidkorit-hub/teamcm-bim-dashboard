@@ -1171,12 +1171,21 @@ function renderReportContent(ctx) {
   // --- Cover Page ---
   if (showSection('cover')) {
     const logos = proj.reportLogos || {};
-    const logoItems = [['owner','Owner'],['cm','CM (TEAM·CM)'],['contractor','Contractor']].filter(([k]) => logos[k]);
+    const coverImg = proj.reportCoverImage || '';
+    // A dark navy overlay sits under the text either way — over a photo it keeps
+    // white text readable; with no photo it's just the flat navy header as before.
+    const headerBg = coverImg
+      ? `background-image:linear-gradient(rgba(31,58,95,.82),rgba(22,41,74,.88)),url('${coverImg}');background-size:cover;background-position:center`
+      : `background:var(--navy)`;
     html += `<div class="rpt-page rpt-cover" style="${pageStyle};min-height:280px;display:flex;flex-direction:column">
-      <div style="background:var(--navy);color:#fff;padding:24px 30px;border-bottom:4px solid var(--green);flex:1;display:flex;flex-direction:column;justify-content:space-between">
-        <div>
-          <div style="font-family:Montserrat;font-weight:800;font-size:30px;letter-spacing:.4px">TEAM·CM</div>
-          <div style="font-size:12px;color:#a8bcdb;letter-spacing:1.4px;text-transform:uppercase;margin-top:3px">BIM Coordination Report</div>
+      <div style="${headerBg};color:#fff;padding:24px 30px;border-bottom:4px solid var(--green);flex:1;display:flex;flex-direction:column;justify-content:space-between;position:relative">
+        ${logos.owner ? `<img src="${logos.owner}" style="position:absolute;top:22px;right:28px;height:50px;max-width:150px;object-fit:contain" />` : ''}
+        <div style="display:flex;align-items:center;gap:14px;padding-right:${logos.owner ? '160px' : '0'}">
+          ${logos.cm ? `<img src="${logos.cm}" style="height:44px;max-width:120px;object-fit:contain;flex-shrink:0" />` : ''}
+          <div>
+            <div style="font-family:Montserrat;font-weight:800;font-size:30px;letter-spacing:.4px">TEAM·CM</div>
+            <div style="font-size:12px;color:#a8bcdb;letter-spacing:1.4px;text-transform:uppercase;margin-top:3px">BIM Coordination Report</div>
+          </div>
         </div>
         <div style="margin-top:30px">
           <div style="font-family:Montserrat;font-weight:700;font-size:26px;letter-spacing:-.2px;line-height:1.15">${esc(proj.name)}</div>
@@ -1184,15 +1193,12 @@ function renderReportContent(ctx) {
         </div>
         <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:30px;font-size:11.5px;color:#a8bcdb">
           <div>Printed by <strong style="color:#fff">${esc(state.user.name)}</strong> · ${esc(state.user.role)}</div>
-          <div>${today} · TEAMCM HQ</div>
+          <div style="display:flex;align-items:center;gap:10px">
+            ${logos.contractor ? `<img src="${logos.contractor}" style="height:20px;max-width:90px;object-fit:contain;opacity:.95" />` : ''}
+            <span>${today} · TEAMCM HQ</span>
+          </div>
         </div>
       </div>
-      ${logoItems.length ? `<div style="background:#fff;padding:14px 30px;display:flex;align-items:center;justify-content:center;gap:36px;border-top:1px solid #e2e8f0">
-        ${logoItems.map(([k,label]) => `<div style="text-align:center">
-          <img src="${logos[k]}" style="height:38px;max-width:140px;object-fit:contain;display:block;margin:0 auto" />
-          <div style="font-size:8.5px;color:#94a3b8;text-transform:uppercase;letter-spacing:.5px;margin-top:4px;font-family:JetBrains Mono">${label}</div>
-        </div>`).join('')}
-      </div>` : ''}
     </div>`;
   }
 
@@ -2918,7 +2924,8 @@ function saveNewProject() {
     phase: $('#np-phase').value || '—',
     status,
     clientDomains: [],
-    reportLogos: { owner: '', cm: '', contractor: '' }
+    reportLogos: { owner: '', cm: '', contractor: '' },
+    reportCoverImage: ''
   });
   PROJECT_ISSUES[newId] = [];
   PROJECT_AUDIT[newId] = [];
@@ -2943,7 +2950,7 @@ function openEditProject(i) {
   if (!requirePermission('users', 'แก้ไข project')) return;
   const p = PROJECTS[i];
   if (!p) return;
-  _editProjectLogos = { owner: (p.reportLogos&&p.reportLogos.owner)||'', cm: (p.reportLogos&&p.reportLogos.cm)||'', contractor: (p.reportLogos&&p.reportLogos.contractor)||'' };
+  _editProjectLogos = { owner: (p.reportLogos&&p.reportLogos.owner)||'', cm: (p.reportLogos&&p.reportLogos.cm)||'', contractor: (p.reportLogos&&p.reportLogos.contractor)||'', cover: p.reportCoverImage||'' };
   const logoSlot = (key, label) => `
     <div style="text-align:center">
       <div style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600;margin-bottom:6px">${label}</div>
@@ -2973,12 +2980,20 @@ function openEditProject(i) {
           <div style="font-size:11px;color:var(--muted);margin-top:4px">อีเมลโดเมนนี้จะล็อกอินเข้าได้เฉพาะโครงการนี้ ในฐานะ Client Reviewer (ดู + คอมเมนต์เท่านั้น) — เพิ่มทีละคนได้ที่หน้า Users แทน ถ้าไม่อยากเปิดทั้งโดเมน</div>
         </div>
         <div class="form-row">
-          <label>Report logos <span style="font-weight:400;color:var(--muted)">— แสดงบนหน้าปกรายงาน PDF</span></label>
+          <label>Report logos <span style="font-weight:400;color:var(--muted)">— CM ติดข้างชื่อหัวรายงาน, Owner มุมขวาบน, Contractor เล็กๆ ที่แถบล่าง</span></label>
           <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:6px">
-            ${logoSlot('owner','Owner')}
             ${logoSlot('cm','CM (TEAM·CM)')}
+            ${logoSlot('owner','Owner')}
             ${logoSlot('contractor','Contractor')}
           </div>
+        </div>
+        <div class="form-row">
+          <label>Cover background image <span style="font-weight:400;color:var(--muted)">— แทนที่พื้นหลังสีน้ำเงินของหน้าปก (จะมีฟิลเตอร์เข้มทับให้ตัวหนังสือขาวยังอ่านออก)</span></label>
+          <label style="display:block;width:100%;aspect-ratio:21/9;border:1.5px dashed var(--border);border-radius:6px;cursor:pointer;overflow:hidden;background:var(--bg);position:relative;margin-top:6px">
+            <img id="ep-logo-cover-img" src="${_editProjectLogos.cover||''}" style="width:100%;height:100%;object-fit:cover;display:${_editProjectLogos.cover?'block':'none'}"/>
+            <span id="ep-logo-cover-ph" style="display:${_editProjectLogos.cover?'none':'flex'};position:absolute;inset:0;align-items:center;justify-content:center;font-size:11px;color:var(--muted)">+ Upload background image (ไม่บังคับ)</span>
+            <input type="file" accept="image/*" class="hide" onchange="handleEditProjectLogo(event,'cover')"/>
+          </label>
         </div>
         <div style="background:var(--bg);border-radius:6px;padding:10px 12px;font-size:11.5px;color:var(--muted);display:flex;justify-content:space-between">
           <span>${(PROJECT_ISSUES[i]||[]).length} issues · ${(PROJECT_ISSUES[i]||[]).filter(x=>x.status!=='RESOLVED').length} open</span>
@@ -2998,8 +3013,8 @@ async function handleEditProjectLogo(event, key) {
   if (!file) return;
   if (!file.type.startsWith('image/')) { toast('⚠️ ต้องเป็นไฟล์รูปภาพ', '#d97706'); return; }
   try {
-    const data = await readImageAsDataURL(file, 480);
-    if (!_editProjectLogos) _editProjectLogos = { owner:'', cm:'', contractor:'' };
+    const data = await readImageAsDataURL(file, key === 'cover' ? 1400 : 480);
+    if (!_editProjectLogos) _editProjectLogos = { owner:'', cm:'', contractor:'', cover:'' };
     _editProjectLogos[key] = data;
     const img = document.getElementById(`ep-logo-${key}-img`);
     const ph = document.getElementById(`ep-logo-${key}-ph`);
@@ -3020,7 +3035,10 @@ function saveEditProject(i) {
   p.status = $('#ep-status').value;
   p.active = p.status === 'Active';
   p.clientDomains = ($('#ep-client-domains').value || '').split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-  if (_editProjectLogos) p.reportLogos = { ..._editProjectLogos };
+  if (_editProjectLogos) {
+    p.reportLogos = { owner: _editProjectLogos.owner, cm: _editProjectLogos.cm, contractor: _editProjectLogos.contractor };
+    p.reportCoverImage = _editProjectLogos.cover || '';
+  }
   if (oldStatus !== p.status) {
     getAud().unshift({
       ts: '15/05/26 ' + new Date().toTimeString().slice(0,5),

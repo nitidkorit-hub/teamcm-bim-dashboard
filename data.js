@@ -4,8 +4,8 @@
    - EE:69, AC:19, AR:17, SN:15, FP:15, ST:7, LA:2, IN:1 (=145)
 */
 const PROJECTS = [
-  { id: 0, name: 'Sample Project A', code: 'DEMO-SAMPLE-A', desc: 'ตัวอย่างโปรเจค — สร้างโปรเจคของคุณเอง', active: true, phase: 'IFC50', status: 'Active', clientDomains: [], reportLogos: { owner: '', cm: '', contractor: '' } },
-  { id: 1, name: 'Sample Project B', code: 'DEMO-SAMPLE-B', desc: 'ตัวอย่างที่ 2 — Import CSV ของคุณได้เลย', active: false, phase: 'IFC42', status: 'On Hold', clientDomains: [], reportLogos: { owner: '', cm: '', contractor: '' } }
+  { id: 0, name: 'Sample Project A', code: 'DEMO-SAMPLE-A', desc: 'ตัวอย่างโปรเจค — สร้างโปรเจคของคุณเอง', active: true, phase: 'IFC50', status: 'Active', clientDomains: [], reportLogos: { owner: '', cm: '', contractor: '' }, reportCoverImage: '' },
+  { id: 1, name: 'Sample Project B', code: 'DEMO-SAMPLE-B', desc: 'ตัวอย่างที่ 2 — Import CSV ของคุณได้เลย', active: false, phase: 'IFC42', status: 'On Hold', clientDomains: [], reportLogos: { owner: '', cm: '', contractor: '' }, reportCoverImage: '' }
 ];
 
 // USERS list — populated from Firebase + auto-grows as new users sign in.
