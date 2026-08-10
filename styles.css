@@ -333,20 +333,6 @@ input,select,textarea{font-family:inherit}
 .burn-legend span{display:flex;align-items:center;gap:6px}
 .burn-legend i{width:14px;height:3px;border-radius:2px;display:inline-block}
 
-/* Heatmap */
-.heat-grid{display:grid;gap:3px;font-family:'JetBrains Mono',monospace;font-size:11px}
-.heat-cell{
-  aspect-ratio:1.7/1;border-radius:4px;
-  display:grid;place-items:center;
-  color:#1a2540;font-weight:600;
-  transition:transform .1s;cursor:pointer;
-  min-height:30px;
-}
-.heat-cell:hover{transform:scale(1.06);box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:1;position:relative}
-.heat-cell.empty{color:#c5cfdf}
-.heat-corner{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:grid;place-items:center;font-weight:600}
-.heat-axis{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:grid;place-items:center;font-weight:700}
-
 /* ===== Bottom row: Recent + Activity ===== */
 .bottom-row{display:grid;grid-template-columns:2fr 1fr;gap:14px}
 
@@ -757,6 +743,20 @@ input,select,textarea{font-family:inherit}
 .notif-item .ni-time{font-size:10.5px;color:var(--muted);margin-top:2px;font-family:'JetBrains Mono',monospace}
 .notif-item > svg{width:18px;height:18px;flex-shrink:0;color:var(--green)}
 .notif-item span > svg{width:18px;height:18px}
+
+/* Heat grid (used by the Clash Matrix on the Clashes page) */
+.heat-grid{display:grid;gap:3px;font-family:'JetBrains Mono',monospace;font-size:11px}
+.heat-cell{
+  aspect-ratio:1.7/1;border-radius:4px;
+  display:grid;place-items:center;
+  color:#1a2540;font-weight:600;
+  transition:transform .1s;cursor:pointer;
+  min-height:30px;
+}
+.heat-cell:hover{transform:scale(1.06);box-shadow:0 2px 8px rgba(0,0,0,.15);z-index:1;position:relative}
+.heat-cell.empty{color:#c5cfdf}
+.heat-corner{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:grid;place-items:center;font-weight:600}
+.heat-axis{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;display:grid;place-items:center;font-weight:700}
 
 .hdr-btn-wrap{position:relative}
 

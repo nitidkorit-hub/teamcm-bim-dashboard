@@ -18,7 +18,7 @@ const state = {
   theme: localStorage.getItem('tcm_theme') || 'light',
   imgStore: (function(){ try { return JSON.parse(localStorage.getItem('tcm_imgs') || '{}'); } catch(e){ return {}; } })(),
   notifications: [],
-  reportOpts: { disciplines: [], sections: ['cover','exec','charts','heatmap','cards'], filter:'all' }
+  reportOpts: { disciplines: [], statuses: [], sections: ['cover','exec','charts','cards'] }
 };
 
 // ===== Project-scoped data accessors =====
@@ -365,31 +365,23 @@ function renderDashboard() {
       </div>
     </div>
 
-    <!-- Burndown + Heatmap -->
-    <div class="wide-row">
-      <div class="card">
-        <div class="card-h">
-          <div><h3>Burndown — 14 days</h3><div class="ch-sub">เปิดใหม่ · ปิดงาน · backlog รวม</div></div>
-          <div style="display:flex;gap:6px">
-            <button class="btn btn-g btn-sm">14D</button>
-            <button class="btn btn-g btn-sm" style="opacity:.55">30D</button>
-            <button class="btn btn-g btn-sm" style="opacity:.55">90D</button>
-          </div>
-        </div>
-        <div class="card-b">
-          ${burndownSVG(BURNDOWN)}
-          <div class="burn-legend">
-            <span><i style="background:#9333ea"></i> Opened</span>
-            <span><i style="background:#2DBE60"></i> Resolved</span>
-            <span><i style="background:#3A6EA5"></i> Open backlog</span>
-          </div>
+    <!-- Burndown -->
+    <div class="card" style="margin-bottom:18px">
+      <div class="card-h">
+        <div><h3>Burndown — 14 days</h3><div class="ch-sub">เปิดใหม่ · ปิดงาน · backlog รวม</div></div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-g btn-sm">14D</button>
+          <button class="btn btn-g btn-sm" style="opacity:.55">30D</button>
+          <button class="btn btn-g btn-sm" style="opacity:.55">90D</button>
         </div>
       </div>
-      <div class="card">
-        <div class="card-h">
-          <div><h3>Heatmap · Discipline × Zone</h3><div class="ch-sub">จุดร้อนของ coordination issues</div></div>
+      <div class="card-b">
+        ${burndownSVG(BURNDOWN)}
+        <div class="burn-legend">
+          <span><i style="background:#9333ea"></i> Opened</span>
+          <span><i style="background:#2DBE60"></i> Resolved</span>
+          <span><i style="background:#3A6EA5"></i> Open backlog</span>
         </div>
-        <div class="card-b">${heatmap()}</div>
       </div>
     </div>
 
@@ -560,53 +552,6 @@ function burndownSVG(data) {
   </svg>`;
 }
 
-// ===== Heatmap =====
-function heatmap() {
-  const discs = VALID_DISC_CODES;
-  const zones = ['ZONE 1','ZONE 2'];
-  // count per disc x zone (only primary disc)
-  const grid = {};
-  let max = 0;
-  getIss().forEach(it => {
-    const d = it.discPrimary, z = it.zone;
-    const k = d + '|' + z;
-    grid[k] = (grid[k]||0) + 1;
-    if (grid[k] > max) max = grid[k];
-  });
-  // Render: top row is corner + zones; below: disc rows
-  const cells = [];
-  cells.push(`<div class="heat-corner">DISC \\ ZONE</div>`);
-  zones.forEach(z => cells.push(`<div class="heat-axis">${z.replace('ZONE ','Z')}</div>`));
-  discs.forEach(d => {
-    cells.push(`<div class="heat-axis" style="color:${DISC_COLOR[d]};text-align:left;padding-left:4px;justify-content:flex-start">${d}</div>`);
-    zones.forEach(z => {
-      const v = grid[d+'|'+z] || 0;
-      const ratio = max > 0 ? v / max : 0;
-      // green-to-red gradient based on count (more = warmer)
-      let bg, fg = '#1a2540';
-      if (v === 0) { bg = '#f7faff'; fg = '#c5cfdf'; }
-      else if (ratio < 0.2) bg = '#e8f4ed';
-      else if (ratio < 0.4) bg = '#bce6cd';
-      else if (ratio < 0.6) bg = '#f7e3b8';
-      else if (ratio < 0.8) { bg = '#f5b683'; fg = '#fff' }
-      else { bg = '#dc6c52'; fg = '#fff'; }
-      cells.push(`<div class="heat-cell ${v===0?'empty':''}" style="background:${bg};color:${fg}" title="${d} × ${z}: ${v} issues">${v||'·'}</div>`);
-    });
-  });
-  return `<div class="heat-grid" style="grid-template-columns: 90px repeat(${zones.length}, 1fr)">${cells.join('')}</div>
-  <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;font-size:11px;color:var(--muted)">
-    <span>Less issues</span>
-    <div style="display:flex;gap:2px">
-      <span style="width:14px;height:10px;background:#f7faff;border-radius:2px"></span>
-      <span style="width:14px;height:10px;background:#e8f4ed;border-radius:2px"></span>
-      <span style="width:14px;height:10px;background:#bce6cd;border-radius:2px"></span>
-      <span style="width:14px;height:10px;background:#f7e3b8;border-radius:2px"></span>
-      <span style="width:14px;height:10px;background:#f5b683;border-radius:2px"></span>
-      <span style="width:14px;height:10px;background:#dc6c52;border-radius:2px"></span>
-    </div>
-    <span>More issues</span>
-  </div>`;
-}
 
 // ===== Issues page =====
 function renderIssues() {
@@ -1057,8 +1002,9 @@ function actionBadgeCls(action) {
 function getReportIssues() {
   let arr = getIss();
   const o = state.reportOpts;
-  if (o.filter === 'open') arr = arr.filter(i => i.status !== 'RESOLVED');
-  else if (o.filter === 'critical') arr = arr.filter(i => i.priority === 'Critical');
+  if (o.statuses && o.statuses.length) {
+    arr = arr.filter(i => o.statuses.includes(i.status));
+  }
   if (o.disciplines && o.disciplines.length) {
     arr = arr.filter(i => o.disciplines.some(d => discArray(i.disc).includes(d)));
   }
@@ -1117,7 +1063,6 @@ function renderReport() {
                 ['cover','Cover Page'],
                 ['exec','Executive Summary'],
                 ['charts','Charts (Priority, Status, Discipline)'],
-                ['heatmap','Heatmap (Zone × Discipline)'],
                 ['cards','Issue Cards with Viewpoints'],
                 ['comments','Comment History'],
                 ['audit','Audit Trail']
@@ -1127,12 +1072,10 @@ function renderReport() {
                 </label>`).join('')}
             </div>
             <div>
-              <div style="font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px">Filter Issues</div>
-              <select class="fsel" style="width:100%;margin-bottom:6px" onchange="state.reportOpts.filter=this.value;render()">
-                <option value="all" ${opts.filter==='all'?'selected':''}>All issues (${all.length})</option>
-                <option value="open" ${opts.filter==='open'?'selected':''}>Active + New only (${all.filter(i=>i.status!=='RESOLVED').length})</option>
-                <option value="critical" ${opts.filter==='critical'?'selected':''}>Critical only (${all.filter(i=>i.priority==='Critical').length})</option>
-              </select>
+              <div style="font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px">Status</div>
+              ${renderStatusMultiSelect()}
+              <div style="height:10px"></div>
+              <div style="font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px">Discipline</div>
               ${renderDiscMultiSelect()}
             </div>
             <div style="background:var(--green-soft);border-radius:6px;padding:10px 12px;font-size:12px;color:var(--green-2);display:flex;align-items:center;gap:8px">
@@ -1224,7 +1167,7 @@ function renderReportContent(ctx) {
           <strong>สรุป:</strong> โครงการ ${esc(proj.name)} ระยะ ${esc(proj.phase)} มี coordination issues ทั้งหมด ${ft} รายการ
           (เปิด ${ft - resolved} · ปิด ${resolved}) · Critical ${critical} รายการ · เฉลี่ยอายุของ issue ที่ยังเปิด ${avgAge} วัน
           ${opts.disciplines.length ? ` · กรองเฉพาะสาขา ${opts.disciplines.join(', ')}` : ''}
-          ${opts.filter !== 'all' ? ` · filter: ${opts.filter}` : ''}.
+          ${opts.statuses && opts.statuses.length ? ` · status: ${opts.statuses.join(', ')}` : ''}.
         </div>
       </div>
     </div>`;
@@ -1251,16 +1194,6 @@ function renderReportContent(ctx) {
             ${barChart(dcItems)}
           </div>
         </div>
-      </div>
-    </div>`;
-  }
-
-  // --- Heatmap ---
-  if (showSection('heatmap')) {
-    html += `<div class="rpt-page" style="${pageStyle}">
-      <div style="padding:20px 26px">
-        <div style="font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:.6px;font-weight:700;margin-bottom:12px">Heatmap · Discipline × Zone</div>
-        ${heatmapForIssues(filtered)}
       </div>
     </div>`;
   }
@@ -1352,39 +1285,6 @@ function reportIssueCard(it, showComment) {
       </div>
     </div>
   </div>`;
-}
-
-// Heatmap for a filtered subset (for report preview / PDF)
-function heatmapForIssues(arr) {
-  const discs = VALID_DISC_CODES;
-  const zones = ['ZONE 1','ZONE 2'];
-  const grid = {};
-  let max = 0;
-  arr.forEach(it => {
-    const d = it.discPrimary, z = it.zone;
-    const k = d + '|' + z;
-    grid[k] = (grid[k]||0) + 1;
-    if (grid[k] > max) max = grid[k];
-  });
-  const cells = [];
-  cells.push(`<div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.5px;font-weight:600;text-align:center;padding:6px 0">DISC \\ ZONE</div>`);
-  zones.forEach(z => cells.push(`<div style="font-size:10.5px;color:#64748b;text-transform:uppercase;font-weight:700;text-align:center;padding:6px 0">${z.replace('ZONE ','Z')}</div>`));
-  discs.forEach(d => {
-    cells.push(`<div style="font-size:11px;color:${DISC_COLOR[d]};font-weight:700;font-family:JetBrains Mono;padding:6px 4px">${d}</div>`);
-    zones.forEach(z => {
-      const v = grid[d+'|'+z] || 0;
-      const ratio = max > 0 ? v / max : 0;
-      let bg, fg = '#1a2540';
-      if (v === 0) { bg = '#f7faff'; fg = '#c5cfdf'; }
-      else if (ratio < 0.2) bg = '#e8f4ed';
-      else if (ratio < 0.4) bg = '#bce6cd';
-      else if (ratio < 0.6) bg = '#f7e3b8';
-      else if (ratio < 0.8) { bg = '#f5b683'; fg = '#fff'; }
-      else { bg = '#dc6c52'; fg = '#fff'; }
-      cells.push(`<div style="aspect-ratio:1.7/1;background:${bg};color:${fg};border-radius:4px;display:grid;place-items:center;font-family:JetBrains Mono;font-weight:600;font-size:13px;min-height:32px">${v||'·'}</div>`);
-    });
-  });
-  return `<div style="display:grid;grid-template-columns:80px repeat(${zones.length},1fr);gap:3px">${cells.join('')}</div>`;
 }
 
 function renderClashes() {
@@ -2212,6 +2112,57 @@ function renderDiscMultiSelect() {
     </div>
   </div>`;
 }
+function renderStatusMultiSelect() {
+  const STATUS_LIST = [
+    { key:'NEW', label:'NEW', cls:'b-new' },
+    { key:'ACTIVE', label:'ACTIVE', cls:'b-active' },
+    { key:'RESOLVED', label:'RESOLVED', cls:'b-resolved' },
+    { key:'Unknown', label:'Unknown', cls:'b-unknown' }
+  ];
+  const selected = state.reportOpts.statuses;
+  const counts = tally(getIss(), 'status');
+  const trigger = selected.length === 0
+    ? `<span class="ms-placeholder">All statuses</span>`
+    : selected.map(s => `<span class="ms-tag">${s}<span class="ms-x" onclick="event.stopPropagation();statusMSToggle('${s}')">×</span></span>`).join('');
+
+  return `<div class="ms-wrap">
+    <button type="button" class="ms-trigger" onclick="statusMSOpen(event)">
+      ${trigger}
+    </button>
+    <div class="ms-menu" id="status-ms-menu">
+      <div class="ms-opt" onclick="statusMSSetAll()">
+        <span class="ck ${selected.length===0?'checked':''}"></span>
+        <span style="flex:1;font-weight:600">All statuses</span>
+        <span class="ci-tag" style="font-size:10px;color:var(--muted)">${getIss().length}</span>
+      </div>
+      <div class="ms-divider"></div>
+      ${STATUS_LIST.map(s => `
+        <div class="ms-opt" onclick="statusMSToggle('${s.key}')">
+          <span class="ck ${selected.includes(s.key)?'checked':''}"></span>
+          <span style="flex:1">${s.label}</span>
+          <span class="badge ${s.cls}" style="font-size:9.5px">${counts[s.key]||0}</span>
+        </div>`).join('')}
+    </div>
+  </div>`;
+}
+function statusMSOpen(e) {
+  e.stopPropagation();
+  $$('.ms-menu.open').forEach(m => m.classList.remove('open'));
+  $('#status-ms-menu').classList.toggle('open');
+}
+function statusMSToggle(key) {
+  const arr = state.reportOpts.statuses;
+  const idx = arr.indexOf(key);
+  if (idx >= 0) arr.splice(idx, 1);
+  else arr.push(key);
+  render();
+  setTimeout(() => { const m = $('#status-ms-menu'); if (m) m.classList.add('open'); }, 10);
+}
+function statusMSSetAll() {
+  state.reportOpts.statuses = [];
+  render();
+}
+
 function discMSOpen(e) {
   e.stopPropagation();
   $$('.ms-menu.open').forEach(m => m.classList.remove('open'));
@@ -3618,6 +3569,7 @@ Object.assign(window, {
   closeModal,
   toggleNotif, readNotif, markAllRead,
   discMSOpen, discMSToggle, discMSSetAll, discMSPreset, toggleReportSection,
+  statusMSOpen, statusMSToggle, statusMSSetAll,
   previewReport, generatePDF, downloadRecentReport,
   toggleProjMenu, switchProject,
   openEditProject, saveEditProject, confirmDeleteProject, duplicateProject, toggleProjActions, handleEditProjectLogo, updateCoverPos,
