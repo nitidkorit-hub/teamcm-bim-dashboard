@@ -1177,7 +1177,6 @@ function renderReportContent(ctx) {
       <div style="${coverImg ? '' : 'background:var(--navy);'}color:#fff;padding:24px 30px;border-bottom:4px solid var(--green);flex:1;display:flex;flex-direction:column;position:relative;overflow:hidden">
         ${coverImg ? `
           <img src="${coverImg}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:${cpos.x}% ${cpos.y}%;transform:scale(${cpos.zoom/100});transform-origin:${cpos.x}% ${cpos.y}%;z-index:0" />
-          <div style="position:absolute;inset:0;background:linear-gradient(rgba(31,58,95,.82),rgba(22,41,74,.88));z-index:0"></div>
         ` : ''}
         <div style="position:relative;z-index:1;flex:1;display:flex;flex-direction:column;justify-content:space-between">
           ${logos.owner ? `<span style="position:absolute;top:0;right:0;display:inline-flex;align-items:center;justify-content:center;background:#fff;border-radius:6px;padding:8px 12px;box-shadow:0 2px 8px rgba(0,0,0,.22)"><img src="${logos.owner}" style="height:36px;max-width:130px;object-fit:contain;display:block" /></span>` : ''}
