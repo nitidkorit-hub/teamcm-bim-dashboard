@@ -1172,30 +1172,32 @@ function renderReportContent(ctx) {
   if (showSection('cover')) {
     const logos = proj.reportLogos || {};
     const coverImg = proj.reportCoverImage || '';
-    // A dark navy overlay sits under the text either way — over a photo it keeps
-    // white text readable; with no photo it's just the flat navy header as before.
-    const headerBg = coverImg
-      ? `background-image:linear-gradient(rgba(31,58,95,.82),rgba(22,41,74,.88)),url('${coverImg}');background-size:cover;background-position:center`
-      : `background:var(--navy)`;
+    const cpos = proj.reportCoverPosition || { x:50, y:50, zoom:100 };
     html += `<div class="rpt-page rpt-cover" style="${pageStyle};min-height:280px;display:flex;flex-direction:column">
-      <div style="${headerBg};color:#fff;padding:24px 30px;border-bottom:4px solid var(--green);flex:1;display:flex;flex-direction:column;justify-content:space-between;position:relative">
-        ${logos.owner ? `<img src="${logos.owner}" style="position:absolute;top:22px;right:28px;height:50px;max-width:150px;object-fit:contain" />` : ''}
-        <div style="display:flex;align-items:center;gap:14px;padding-right:${logos.owner ? '160px' : '0'}">
-          ${logos.cm ? `<img src="${logos.cm}" style="height:44px;max-width:120px;object-fit:contain;flex-shrink:0" />` : ''}
-          <div>
-            <div style="font-family:Montserrat;font-weight:800;font-size:30px;letter-spacing:.4px">TEAM·CM</div>
-            <div style="font-size:12px;color:#a8bcdb;letter-spacing:1.4px;text-transform:uppercase;margin-top:3px">BIM Coordination Report</div>
+      <div style="${coverImg ? '' : 'background:var(--navy);'}color:#fff;padding:24px 30px;border-bottom:4px solid var(--green);flex:1;display:flex;flex-direction:column;position:relative;overflow:hidden">
+        ${coverImg ? `
+          <img src="${coverImg}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:${cpos.x}% ${cpos.y}%;transform:scale(${cpos.zoom/100});transform-origin:${cpos.x}% ${cpos.y}%;z-index:0" />
+          <div style="position:absolute;inset:0;background:linear-gradient(rgba(31,58,95,.82),rgba(22,41,74,.88));z-index:0"></div>
+        ` : ''}
+        <div style="position:relative;z-index:1;flex:1;display:flex;flex-direction:column;justify-content:space-between">
+          ${logos.owner ? `<span style="position:absolute;top:0;right:0;display:inline-flex;align-items:center;justify-content:center;background:#fff;border-radius:6px;padding:8px 12px;box-shadow:0 2px 8px rgba(0,0,0,.22)"><img src="${logos.owner}" style="height:36px;max-width:130px;object-fit:contain;display:block" /></span>` : ''}
+          <div style="display:flex;align-items:center;gap:14px;padding-right:${logos.owner ? '170px' : '0'}">
+            ${logos.cm ? `<span style="display:inline-flex;align-items:center;justify-content:center;background:#fff;border-radius:6px;padding:7px 11px;box-shadow:0 2px 8px rgba(0,0,0,.22);flex-shrink:0"><img src="${logos.cm}" style="height:32px;max-width:100px;object-fit:contain;display:block" /></span>` : ''}
+            <div>
+              <div style="font-family:Montserrat;font-weight:800;font-size:30px;letter-spacing:.4px">TEAM·CM</div>
+              <div style="font-size:12px;color:#a8bcdb;letter-spacing:1.4px;text-transform:uppercase;margin-top:3px">BIM Coordination Report</div>
+            </div>
           </div>
-        </div>
-        <div style="margin-top:30px">
-          <div style="font-family:Montserrat;font-weight:700;font-size:26px;letter-spacing:-.2px;line-height:1.15">${esc(proj.name)}</div>
-          <div style="font-size:13px;color:#a8bcdb;margin-top:6px;font-family:JetBrains Mono">${esc(proj.code)} · ${esc(proj.phase)} · ${esc(proj.desc)}</div>
-        </div>
-        <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:30px;font-size:11.5px;color:#a8bcdb">
-          <div>Printed by <strong style="color:#fff">${esc(state.user.name)}</strong> · ${esc(state.user.role)}</div>
-          <div style="display:flex;align-items:center;gap:10px">
-            ${logos.contractor ? `<img src="${logos.contractor}" style="height:20px;max-width:90px;object-fit:contain;opacity:.95" />` : ''}
-            <span>${today} · TEAMCM HQ</span>
+          <div style="margin-top:30px">
+            <div style="font-family:Montserrat;font-weight:700;font-size:26px;letter-spacing:-.2px;line-height:1.15">${esc(proj.name)}</div>
+            <div style="font-size:13px;color:#a8bcdb;margin-top:6px;font-family:JetBrains Mono">${esc(proj.code)} · ${esc(proj.phase)} · ${esc(proj.desc)}</div>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-top:30px;font-size:11.5px;color:#a8bcdb">
+            <div>Printed by <strong style="color:#fff">${esc(state.user.name)}</strong> · ${esc(state.user.role)}</div>
+            <div style="display:flex;align-items:center;gap:10px">
+              ${logos.contractor ? `<span style="display:inline-flex;align-items:center;justify-content:center;background:#fff;border-radius:4px;padding:4px 8px"><img src="${logos.contractor}" style="height:16px;max-width:80px;object-fit:contain;display:block" /></span>` : ''}
+              <span>${today} · TEAMCM HQ</span>
+            </div>
           </div>
         </div>
       </div>
@@ -2925,7 +2927,8 @@ function saveNewProject() {
     status,
     clientDomains: [],
     reportLogos: { owner: '', cm: '', contractor: '' },
-    reportCoverImage: ''
+    reportCoverImage: '',
+    reportCoverPosition: { x: 50, y: 50, zoom: 100 }
   });
   PROJECT_ISSUES[newId] = [];
   PROJECT_AUDIT[newId] = [];
@@ -2950,7 +2953,12 @@ function openEditProject(i) {
   if (!requirePermission('users', 'แก้ไข project')) return;
   const p = PROJECTS[i];
   if (!p) return;
-  _editProjectLogos = { owner: (p.reportLogos&&p.reportLogos.owner)||'', cm: (p.reportLogos&&p.reportLogos.cm)||'', contractor: (p.reportLogos&&p.reportLogos.contractor)||'', cover: p.reportCoverImage||'' };
+  _editProjectLogos = {
+    owner: (p.reportLogos&&p.reportLogos.owner)||'', cm: (p.reportLogos&&p.reportLogos.cm)||'', contractor: (p.reportLogos&&p.reportLogos.contractor)||'',
+    cover: p.reportCoverImage||'',
+    coverPos: p.reportCoverPosition ? { ...p.reportCoverPosition } : { x:50, y:50, zoom:100 }
+  };
+  const cpos = _editProjectLogos.coverPos;
   const logoSlot = (key, label) => `
     <div style="text-align:center">
       <div style="font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;font-weight:600;margin-bottom:6px">${label}</div>
@@ -2990,10 +2998,15 @@ function openEditProject(i) {
         <div class="form-row">
           <label>Cover background image <span style="font-weight:400;color:var(--muted)">— แทนที่พื้นหลังสีน้ำเงินของหน้าปก (จะมีฟิลเตอร์เข้มทับให้ตัวหนังสือขาวยังอ่านออก)</span></label>
           <label style="display:block;width:100%;aspect-ratio:21/9;border:1.5px dashed var(--border);border-radius:6px;cursor:pointer;overflow:hidden;background:var(--bg);position:relative;margin-top:6px">
-            <img id="ep-logo-cover-img" src="${_editProjectLogos.cover||''}" style="width:100%;height:100%;object-fit:cover;display:${_editProjectLogos.cover?'block':'none'}"/>
+            <img id="ep-logo-cover-img" src="${_editProjectLogos.cover||''}" style="width:100%;height:100%;object-fit:cover;object-position:${cpos.x}% ${cpos.y}%;transform:scale(${cpos.zoom/100});transform-origin:${cpos.x}% ${cpos.y}%;display:${_editProjectLogos.cover?'block':'none'}"/>
             <span id="ep-logo-cover-ph" style="display:${_editProjectLogos.cover?'none':'flex'};position:absolute;inset:0;align-items:center;justify-content:center;font-size:11px;color:var(--muted)">+ Upload background image (ไม่บังคับ)</span>
             <input type="file" accept="image/*" class="hide" onchange="handleEditProjectLogo(event,'cover')"/>
           </label>
+          <div id="ep-cover-sliders" style="display:${_editProjectLogos.cover?'grid':'none'};grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:8px;font-size:11px;color:var(--muted)">
+            <div>ซ้าย ↔ ขวา<input id="ep-cover-x" type="range" min="0" max="100" value="${cpos.x}" oninput="updateCoverPos('x', this.value)" style="width:100%"/></div>
+            <div>บน ↕ ล่าง<input id="ep-cover-y" type="range" min="0" max="100" value="${cpos.y}" oninput="updateCoverPos('y', this.value)" style="width:100%"/></div>
+            <div>ซูม<input id="ep-cover-zoom" type="range" min="100" max="220" value="${cpos.zoom}" oninput="updateCoverPos('zoom', this.value)" style="width:100%"/></div>
+          </div>
         </div>
         <div style="background:var(--bg);border-radius:6px;padding:10px 12px;font-size:11.5px;color:var(--muted);display:flex;justify-content:space-between">
           <span>${(PROJECT_ISSUES[i]||[]).length} issues · ${(PROJECT_ISSUES[i]||[]).filter(x=>x.status!=='RESOLVED').length} open</span>
@@ -3014,14 +3027,35 @@ async function handleEditProjectLogo(event, key) {
   if (!file.type.startsWith('image/')) { toast('⚠️ ต้องเป็นไฟล์รูปภาพ', '#d97706'); return; }
   try {
     const data = await readImageAsDataURL(file, key === 'cover' ? 1400 : 480);
-    if (!_editProjectLogos) _editProjectLogos = { owner:'', cm:'', contractor:'', cover:'' };
+    if (!_editProjectLogos) _editProjectLogos = { owner:'', cm:'', contractor:'', cover:'', coverPos:{x:50,y:50,zoom:100} };
     _editProjectLogos[key] = data;
     const img = document.getElementById(`ep-logo-${key}-img`);
     const ph = document.getElementById(`ep-logo-${key}-ph`);
     if (img) { img.src = data; img.style.display = 'block'; }
     if (ph) ph.style.display = 'none';
+    if (key === 'cover') {
+      // fresh photo — reset framing rather than keep whatever the old one was set to
+      _editProjectLogos.coverPos = { x:50, y:50, zoom:100 };
+      ['x','y'].forEach(a => { const el = document.getElementById(`ep-cover-${a}`); if (el) el.value = 50; });
+      const zEl = document.getElementById('ep-cover-zoom'); if (zEl) zEl.value = 100;
+      if (img) { img.style.objectPosition = '50% 50%'; img.style.transform = 'scale(1)'; img.style.transformOrigin = '50% 50%'; }
+      const sliders = document.getElementById('ep-cover-sliders');
+      if (sliders) sliders.style.display = 'grid';
+    }
   } catch (e) {
     toast('❌ โหลดโลโก้ไม่สำเร็จ', '#dc2626');
+  }
+}
+function updateCoverPos(axis, val) {
+  if (!_editProjectLogos) return;
+  if (!_editProjectLogos.coverPos) _editProjectLogos.coverPos = { x:50, y:50, zoom:100 };
+  _editProjectLogos.coverPos[axis] = +val;
+  const img = document.getElementById('ep-logo-cover-img');
+  if (img) {
+    const p = _editProjectLogos.coverPos;
+    img.style.objectPosition = `${p.x}% ${p.y}%`;
+    img.style.transform = `scale(${p.zoom/100})`;
+    img.style.transformOrigin = `${p.x}% ${p.y}%`;
   }
 }
 function saveEditProject(i) {
@@ -3038,6 +3072,7 @@ function saveEditProject(i) {
   if (_editProjectLogos) {
     p.reportLogos = { owner: _editProjectLogos.owner, cm: _editProjectLogos.cm, contractor: _editProjectLogos.contractor };
     p.reportCoverImage = _editProjectLogos.cover || '';
+    p.reportCoverPosition = _editProjectLogos.coverPos || { x:50, y:50, zoom:100 };
   }
   if (oldStatus !== p.status) {
     getAud().unshift({
@@ -3586,7 +3621,7 @@ Object.assign(window, {
   discMSOpen, discMSToggle, discMSSetAll, discMSPreset, toggleReportSection,
   previewReport, generatePDF, downloadRecentReport,
   toggleProjMenu, switchProject,
-  openEditProject, saveEditProject, confirmDeleteProject, duplicateProject, toggleProjActions, handleEditProjectLogo,
+  openEditProject, saveEditProject, confirmDeleteProject, duplicateProject, toggleProjActions, handleEditProjectLogo, updateCoverPos,
   // Firebase Auth
   fbSignIn, fbSignInMicrosoft, fbSignOut
 });
