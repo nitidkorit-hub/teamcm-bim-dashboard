@@ -18,7 +18,8 @@ const state = {
   theme: localStorage.getItem('tcm_theme') || 'light',
   imgStore: (function(){ try { return JSON.parse(localStorage.getItem('tcm_imgs') || '{}'); } catch(e){ return {}; } })(),
   notifications: [],
-  reportOpts: { disciplines: [], statuses: [], sections: ['cover','exec','charts','cards'] }
+  reportOpts: { disciplines: [], statuses: [], sections: ['cover','exec','charts','cards'] },
+  libraryFilter: { category: 'all', q: '' }
 };
 
 // ===== Project-scoped data accessors =====
@@ -68,7 +69,8 @@ const I = {
   sun:       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>',
   moon:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>',
   trash:     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
-  check2:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>'
+  check2:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+  library:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>'
 };
 
 // Discipline color lookup
@@ -203,6 +205,9 @@ function renderSidebar() {
     <div class="ni ${state.page==='report'?'active':''}" data-page="report">${I.report}<span>Publish Report</span></div>
     <div class="ni ${state.page==='analytics'?'active':''}" data-page="analytics">${I.analytics}<span>Analytics</span></div>
 
+    ${state.user.role !== 'Client Reviewer' ? `<div class="sb-sec">Resources</div>
+    <div class="ni ${state.page==='library'?'active':''}" data-page="library">${I.library}<span>Library</span></div>` : ''}
+
     <div class="sb-sec">Management</div>
     <div class="ni ${state.page==='projects'?'active':''}" data-page="projects">${I.projects}<span>Projects</span></div>
     ${hasPermission('users') ? `<div class="ni ${state.page==='users'?'active':''}" data-page="users">${I.users}<span>Users &amp; Roles</span></div>` : ''}
@@ -217,7 +222,7 @@ function renderSidebar() {
 
 function renderHeader() {
   const proj = PROJECTS[state.projIdx];
-  const pnames = { dashboard:'Dashboard', issues:'Issues', clashes:'Clashes', report:'Publish Report', analytics:'Analytics', projects:'Projects', users:'Users & Roles', audit:'Audit Log' };
+  const pnames = { dashboard:'Dashboard', issues:'Issues', clashes:'Clashes', report:'Publish Report', analytics:'Analytics', library:'Library', projects:'Projects', users:'Users & Roles', audit:'Audit Log' };
   return `<header class="hdr">
     <div class="hdr-btn-wrap">
       <div class="proj-switch" id="proj-switch" onclick="toggleProjMenu(event)">
@@ -1058,6 +1063,19 @@ function renderReport() {
           <div class="card-h"><div><h3>Report Options</h3></div></div>
           <div class="card-b" style="display:flex;flex-direction:column;gap:14px">
             <div>
+              <div style="font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px">Template</div>
+              <div style="display:flex;gap:6px">
+                <select class="fsel" style="flex:1" onchange="applyReportTemplate(this.value)">
+                  <option value="">— เลือก template ที่บันทึกไว้ —</option>
+                  ${REPORT_TEMPLATES.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}
+                </select>
+                <button class="btn btn-g btn-sm" title="Save current options as a template" onclick="openSaveReportTemplate()">${I.plus}</button>
+              </div>
+              ${REPORT_TEMPLATES.length ? `<div style="display:flex;flex-wrap:wrap;gap:5px;margin-top:8px">
+                ${REPORT_TEMPLATES.map(t => `<span class="ms-tag">${esc(t.name)}<span class="ms-x" onclick="deleteReportTemplate('${t.id}')" title="Delete template">×</span></span>`).join('')}
+              </div>` : ''}
+            </div>
+            <div>
               <div style="font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px">Include Sections</div>
               ${[
                 ['cover','Cover Page'],
@@ -1121,7 +1139,7 @@ function renderReportContent(ctx) {
         ${coverImg ? `
           <img src="${coverImg}" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:${cpos.x}% ${cpos.y}%;transform:scale(${cpos.zoom/100});transform-origin:${cpos.x}% ${cpos.y}%;z-index:0" />
         ` : ''}
-        <div style="position:relative;z-index:1;flex:1;display:flex;flex-direction:column;justify-content:space-between">
+        <div style="position:relative;z-index:1;flex:1;display:flex;flex-direction:column;justify-content:space-between${coverImg ? ';text-shadow:0 1px 3px rgba(0,0,0,.7),0 2px 10px rgba(0,0,0,.5)' : ''}">
           ${logos.owner ? `<span style="position:absolute;top:0;right:0;display:inline-flex;align-items:center;justify-content:center;background:#fff;border-radius:6px;padding:8px 12px;box-shadow:0 2px 8px rgba(0,0,0,.22)"><img src="${logos.owner}" style="height:36px;max-width:130px;object-fit:contain;display:block" /></span>` : ''}
           <div style="display:flex;align-items:center;gap:14px;padding-right:${logos.owner ? '170px' : '0'}">
             ${logos.cm ? `<span style="display:inline-flex;align-items:center;justify-content:center;background:#fff;border-radius:6px;padding:7px 11px;box-shadow:0 2px 8px rgba(0,0,0,.22);flex-shrink:0"><img src="${logos.cm}" style="height:32px;max-width:100px;object-fit:contain;display:block" /></span>` : ''}
@@ -1285,6 +1303,154 @@ function reportIssueCard(it, showComment) {
       </div>
     </div>
   </div>`;
+}
+
+// ===== Library (standards / regulations / SOP documents) =====
+function getFilteredLibraryDocs() {
+  const f = state.libraryFilter;
+  return LIBRARY_DOCS.filter(d => {
+    if (f.category !== 'all' && d.category !== f.category) return false;
+    if (f.q) {
+      const q = f.q.toLowerCase();
+      const hay = (d.title + ' ' + (d.tags||[]).join(' ')).toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+function libraryFileIcon(fileName) {
+  const ext = (fileName || '').split('.').pop().toLowerCase();
+  if (ext === 'pdf') return { label:'PDF', bg:'#fee2e2', fg:'#dc2626' };
+  if (['doc','docx'].includes(ext)) return { label:'DOC', bg:'#dbeafe', fg:'#2563eb' };
+  if (['xls','xlsx'].includes(ext)) return { label:'XLS', bg:'#dcfce7', fg:'#16a34a' };
+  return { label:ext.slice(0,4).toUpperCase()||'FILE', bg:'#f1f5f9', fg:'#64748b' };
+}
+function renderLibrary() {
+  const f = state.libraryFilter;
+  const canManage = hasPermission('library');
+  const filtered = getFilteredLibraryDocs();
+  return `<div class="page">
+    <div class="page-head">
+      <div>
+        <h1 class="page-title">Library</h1>
+        <div class="page-sub">คู่มือ มาตรฐาน และกฎหมายที่เกี่ยวข้อง — ${LIBRARY_DOCS.length} เอกสาร</div>
+      </div>
+      ${canManage ? `<button class="btn btn-p" onclick="openUploadLibraryDoc()">${I.plus}<span>Upload Document</span></button>` : ''}
+    </div>
+
+    <div class="toolbar">
+      <div class="fchips">
+        <button class="fchip ${f.category==='all'?'active':''}" onclick="setLibraryFilter('category','all')">All <span class="fch-n">${LIBRARY_DOCS.length}</span></button>
+        ${LIBRARY_CATEGORIES.map(c => `<button class="fchip ${f.category===c?'active':''}" onclick="setLibraryFilter('category','${esc(c)}')">${esc(c)} <span class="fch-n">${LIBRARY_DOCS.filter(d=>d.category===c).length}</span></button>`).join('')}
+      </div>
+      <div class="tb-search">
+        ${I.search}<input type="text" placeholder="ค้นหาชื่อเอกสาร / แท็ก…" value="${esc(f.q)}" oninput="setLibraryFilter('q', this.value)" />
+      </div>
+      <div class="tb-spacer"></div>
+      <span class="tb-count">แสดง <strong>${filtered.length}</strong> จาก <strong>${LIBRARY_DOCS.length}</strong></span>
+    </div>
+
+    ${filtered.length === 0 ? `<div class="card" style="padding:60px;text-align:center;color:var(--muted)">
+      <div style="font-size:14px;margin-bottom:10px">${LIBRARY_DOCS.length === 0 ? 'ยังไม่มีเอกสารในคลัง' : 'ไม่พบเอกสารที่ตรงกับตัวกรอง'}</div>
+      ${canManage && LIBRARY_DOCS.length === 0 ? `<button class="btn btn-p" onclick="openUploadLibraryDoc()">${I.plus}<span>อัปโหลดเอกสารแรก</span></button>` : ''}
+    </div>` : `
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
+      ${filtered.map(d => libraryDocCard(d, canManage)).join('')}
+    </div>`}
+  </div>`;
+}
+function libraryDocCard(d, canManage) {
+  const icon = libraryFileIcon(d.fileName);
+  return `<div class="card" style="overflow:hidden">
+    <div style="padding:14px 16px;display:flex;gap:11px;align-items:flex-start">
+      <div style="width:40px;height:40px;border-radius:8px;background:${icon.bg};color:${icon.fg};display:grid;place-items:center;font-family:JetBrains Mono;font-weight:700;font-size:10px;flex-shrink:0">${icon.label}</div>
+      <div style="flex:1;min-width:0">
+        <div style="font-weight:600;font-size:13.5px;color:var(--text);line-height:1.35;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${esc(d.title)}</div>
+        <div style="margin-top:5px"><span class="badge b-active" style="font-size:9.5px">${esc(d.category)}</span></div>
+      </div>
+    </div>
+    ${(d.tags && d.tags.length) ? `<div style="padding:0 16px;display:flex;flex-wrap:wrap;gap:4px">${d.tags.map(t=>`<span style="font-size:10px;color:var(--muted);background:var(--bg);border-radius:3px;padding:2px 6px">#${esc(t)}</span>`).join('')}</div>` : ''}
+    <div style="padding:11px 16px;margin-top:10px;background:var(--bg);border-top:1px solid var(--border-2);display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <div style="font-size:10.5px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.uploadedBy)} · ${formatDate(d.uploadedAt)}</div>
+      <div style="display:flex;gap:6px;flex-shrink:0">
+        <button class="btn btn-g btn-sm" onclick="window.open('${d.fileUrl}','_blank')">${I.download}<span>Open</span></button>
+        ${canManage ? `<button class="t-row-btn" title="Delete" onclick="deleteLibraryDoc('${d.id}')">${I.trash}</button>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+function setLibraryFilter(key, val) {
+  state.libraryFilter[key] = val;
+  render();
+}
+function openUploadLibraryDoc() {
+  if (!requirePermission('library', 'อัปโหลดเอกสาร')) return;
+  openModal(`
+    <div class="modal">
+      <div class="modal-h"><h3>Upload Document</h3><button class="so-close" onclick="closeModal()">${I.close}</button></div>
+      <div class="modal-b">
+        <div class="form-row"><label>Title *</label><input type="text" id="ld-title" placeholder="เช่น กฎกระทรวงควบคุมอาคาร 2566" /></div>
+        <div class="form-row-grid">
+          <div class="form-row"><label>Category</label>
+            <select id="ld-category">${LIBRARY_CATEGORIES.map(c => `<option>${esc(c)}</option>`).join('')}</select>
+          </div>
+          <div class="form-row"><label>Tags <span style="font-weight:400;color:var(--muted)">(คั่นด้วยจุลภาค)</span></label>
+            <input type="text" id="ld-tags" placeholder="fire safety, ผังเมือง" />
+          </div>
+        </div>
+        <div class="form-row"><label>File *</label><input type="file" id="ld-file" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg" /></div>
+        <div style="font-size:11px;color:var(--muted)">ขนาดไม่เกิน 25MB · มองเห็นได้เฉพาะพนักงานภายใน (@teamcm.co.th)</div>
+      </div>
+      <div class="modal-f">
+        <button class="btn btn-g" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-p" id="ld-save-btn" onclick="saveLibraryDoc()">${I.plus}<span>Upload</span></button>
+      </div>
+    </div>`);
+}
+async function saveLibraryDoc() {
+  if (!requirePermission('library', 'อัปโหลดเอกสาร')) return;
+  const title = $('#ld-title').value.trim();
+  const file = $('#ld-file').files && $('#ld-file').files[0];
+  if (!title || !file) { toast('⚠️ ใส่ชื่อเอกสาร + เลือกไฟล์ก่อน', '#d97706'); return; }
+  if (file.size > 25 * 1024 * 1024) { toast('⚠️ ไฟล์ใหญ่เกิน 25MB', '#d97706'); return; }
+
+  const btn = $('#ld-save-btn');
+  if (btn) { btn.disabled = true; btn.style.opacity = '.6'; }
+  toast('⬆️ กำลังอัปโหลด…', '#3A6EA5');
+
+  const id = Date.now().toString(36);
+  try {
+    const fileUrl = await fbUploadLibraryFile(id, file);
+    const doc = {
+      id, title,
+      category: $('#ld-category').value,
+      tags: $('#ld-tags').value.split(',').map(t => t.trim()).filter(Boolean),
+      fileUrl, fileName: file.name, fileSize: file.size,
+      uploadedBy: state.user.name,
+      uploadedAt: new Date().toISOString()
+    };
+    LIBRARY_DOCS.unshift(doc);
+    await fbSaveLibraryDocs(LIBRARY_DOCS);
+    closeModal();
+    toast(`✓ อัปโหลด "${title}" แล้ว`, '#2DBE60');
+    render();
+  } catch (e) {
+    console.warn('Library upload:', e);
+    toast('❌ อัปโหลดไม่สำเร็จ', '#dc2626');
+    if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+  }
+}
+function deleteLibraryDoc(id) {
+  if (!requirePermission('library', 'ลบเอกสาร')) return;
+  const doc = LIBRARY_DOCS.find(d => d.id === id);
+  if (!doc) return;
+  if (!confirm(`ลบเอกสาร "${doc.title}" ?\nการกระทำนี้ย้อนกลับไม่ได้`)) return;
+  const idx = LIBRARY_DOCS.findIndex(d => d.id === id);
+  if (idx >= 0) LIBRARY_DOCS.splice(idx, 1);
+  fbDeleteLibraryFile(doc.fileUrl);
+  fbSaveLibraryDocs(LIBRARY_DOCS).catch(e => console.warn('Firebase library_docs:', e));
+  toast(`🗑 ลบ "${doc.title}"`, '#dc2626');
+  render();
 }
 
 function renderClashes() {
@@ -1464,7 +1630,7 @@ function goPage(p) {
     toast(`🚫 หน้านี้สำหรับ Admin เท่านั้น (role: ${state.user.role})`, '#dc2626');
     return;
   }
-  if (p === 'audit' && state.user.role === 'Client Reviewer') {
+  if ((p === 'audit' || p === 'library') && state.user.role === 'Client Reviewer') {
     toast(`🚫 หน้านี้ไม่เปิดให้ Client Reviewer`, '#dc2626');
     return;
   }
@@ -1595,6 +1761,7 @@ function render() {
         state.page==='projects' ? renderProjects() :
         state.page==='users' ? renderUsers() :
         state.page==='audit' ? renderAudit() :
+        state.page==='library' ? renderLibrary() :
         state.page==='clashes' ? renderClashes() : ''}
     </div>
   </div>`;
@@ -1723,6 +1890,18 @@ async function handleAuthStateChange(firebaseUser) {
     } else {
       await fbSaveUsers(USERS);          // first run → seed
     }
+
+    const cloudTemplates = await fbLoadReportTemplates();
+    if (cloudTemplates && cloudTemplates.length > 0) {
+      REPORT_TEMPLATES.length = 0;
+      cloudTemplates.forEach(t => REPORT_TEMPLATES.push(t));
+    }
+
+    const cloudLibraryDocs = await fbLoadLibraryDocs();
+    if (cloudLibraryDocs && cloudLibraryDocs.length > 0) {
+      LIBRARY_DOCS.length = 0;
+      cloudLibraryDocs.forEach(d => LIBRARY_DOCS.push(d));
+    }
   } catch (e) {
     console.warn('Cloud sync (projects/users):', e);
   }
@@ -1807,6 +1986,16 @@ async function handleAuthStateChange(firebaseUser) {
       }
     }
     if (state.page === 'users') render();
+  });
+  fbSubscribeReportTemplates((templates) => {
+    REPORT_TEMPLATES.length = 0;
+    templates.forEach(t => REPORT_TEMPLATES.push(t));
+    if (state.page === 'report') render();
+  });
+  fbSubscribeLibraryDocs((docs) => {
+    LIBRARY_DOCS.length = 0;
+    docs.forEach(d => LIBRARY_DOCS.push(d));
+    if (state.page === 'library') render();
   });
 
   // Load project data from Firebase (sets up issues + audit listeners)
@@ -2191,6 +2380,62 @@ function toggleReportSection(key) {
   const idx = arr.indexOf(key);
   if (idx >= 0) arr.splice(idx, 1);
   else arr.push(key);
+  render();
+}
+
+// ============== Report Templates ==============
+function openSaveReportTemplate() {
+  if (!requirePermission('report', 'บันทึก template')) return;
+  openModal(`
+    <div class="modal">
+      <div class="modal-h"><h3>Save Report Template</h3><button class="so-close" onclick="closeModal()">${I.close}</button></div>
+      <div class="modal-b">
+        <div class="form-row"><label>Template Name *</label><input type="text" id="rt-name" placeholder="e.g. Weekly Owner Update" /></div>
+        <div style="font-size:11.5px;color:var(--muted)">บันทึก Sections ที่เลือก + ตัวกรอง Status/Discipline ปัจจุบัน — ใช้ได้กับทุกโปรเจกต์</div>
+      </div>
+      <div class="modal-f">
+        <button class="btn btn-g" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-p" onclick="saveReportTemplate()">${I.check2}<span>Save Template</span></button>
+      </div>
+    </div>`);
+}
+function saveReportTemplate() {
+  if (!requirePermission('report', 'บันทึก template')) return;
+  const name = $('#rt-name').value.trim();
+  if (!name) { toast('⚠️ ใส่ชื่อ template ก่อน', '#d97706'); return; }
+  const t = {
+    id: Date.now().toString(36),
+    name,
+    sections: [...state.reportOpts.sections],
+    disciplines: [...state.reportOpts.disciplines],
+    statuses: [...state.reportOpts.statuses],
+    createdBy: state.user.name,
+    createdAt: new Date().toISOString()
+  };
+  REPORT_TEMPLATES.push(t);
+  fbSaveReportTemplates(REPORT_TEMPLATES).catch(e => console.warn('Firebase report_templates:', e));
+  closeModal();
+  toast(`✓ บันทึก template "${name}" แล้ว`, '#2DBE60');
+  render();
+}
+function applyReportTemplate(id) {
+  if (!id) return;
+  const t = REPORT_TEMPLATES.find(x => x.id === id);
+  if (!t) return;
+  state.reportOpts.sections = [...t.sections];
+  state.reportOpts.disciplines = [...t.disciplines];
+  state.reportOpts.statuses = [...t.statuses];
+  toast(`✓ ใช้ template "${t.name}"`, '#2DBE60');
+  render();
+}
+function deleteReportTemplate(id) {
+  const t = REPORT_TEMPLATES.find(x => x.id === id);
+  if (!t) return;
+  if (!confirm(`ลบ template "${t.name}" ?`)) return;
+  const idx = REPORT_TEMPLATES.findIndex(x => x.id === id);
+  if (idx >= 0) REPORT_TEMPLATES.splice(idx, 1);
+  fbSaveReportTemplates(REPORT_TEMPLATES).catch(e => console.warn('Firebase report_templates:', e));
+  toast(`🗑 ลบ template "${t.name}"`, '#dc2626');
   render();
 }
 
@@ -3570,6 +3815,8 @@ Object.assign(window, {
   toggleNotif, readNotif, markAllRead,
   discMSOpen, discMSToggle, discMSSetAll, discMSPreset, toggleReportSection,
   statusMSOpen, statusMSToggle, statusMSSetAll,
+  openSaveReportTemplate, saveReportTemplate, applyReportTemplate, deleteReportTemplate,
+  setLibraryFilter, openUploadLibraryDoc, saveLibraryDoc, deleteLibraryDoc,
   previewReport, generatePDF, downloadRecentReport,
   toggleProjMenu, switchProject,
   openEditProject, saveEditProject, confirmDeleteProject, duplicateProject, toggleProjActions, handleEditProjectLogo, updateCoverPos,

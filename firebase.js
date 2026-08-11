@@ -132,6 +132,79 @@ async function fbSaveUsers(users) {
   ]);
 }
 
+// ─── Report Templates (Realtime Database) ─────────────────────────────
+// Shared across projects — a saved combination of sections/discipline/status
+// filters from the Publish Report page, so it doesn't need to be rebuilt
+// by hand each time.
+async function fbLoadReportTemplates() {
+  const snap = await fbDb.ref('report_templates').get();
+  if (!snap.exists()) return null;
+  return Object.values(snap.val()).sort((a, b) => (a.id ?? 0) - (b.id ?? 0));
+}
+
+async function fbSaveReportTemplates(templates) {
+  const data = {};
+  templates.forEach(t => { data[String(t.id)] = t; });
+  return fbDb.ref('report_templates').set(data);
+}
+
+function fbSubscribeReportTemplates(callback) {
+  _unsubscribe('report_templates');
+  const ref = fbDb.ref('report_templates');
+  const fn = snap => {
+    const data = snap.val();
+    callback(data ? Object.values(data).sort((a, b) => (a.id ?? 0) - (b.id ?? 0)) : []);
+  };
+  ref.on('value', fn);
+  _fbListeners.report_templates = { ref, fn };
+}
+
+// ─── Library (standards / regulations documents) ──────────────────────
+// Metadata in Realtime Database, files in Cloud Storage under library/{docId}/.
+// Internal staff only — see isAllowedLibraryReader() in app.js.
+async function fbLoadLibraryDocs() {
+  const snap = await fbDb.ref('library_docs').get();
+  if (!snap.exists()) return null;
+  return Object.values(snap.val()).sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
+}
+
+async function fbSaveLibraryDocs(docs) {
+  const data = {};
+  docs.forEach(d => { data[String(d.id)] = d; });
+  return fbDb.ref('library_docs').set(data);
+}
+
+function fbSubscribeLibraryDocs(callback) {
+  _unsubscribe('library_docs');
+  const ref = fbDb.ref('library_docs');
+  const fn = snap => {
+    const data = snap.val();
+    const list = data ? Object.values(data) : [];
+    list.sort((a, b) => (b.uploadedAt || '').localeCompare(a.uploadedAt || ''));
+    callback(list);
+  };
+  ref.on('value', fn);
+  _fbListeners.library_docs = { ref, fn };
+}
+
+/** Upload a document File to Cloud Storage. Returns its public download URL. */
+async function fbUploadLibraryFile(docId, file) {
+  if (!fbAuth.currentUser) throw new Error('User not authenticated');
+  const safeName = file.name.replace(/[.$#[\]/]/g, '_');
+  const path = `library/${docId}/${Date.now()}_${safeName}`;
+  const ref = fbStorage.ref(path);
+  const snapshot = await ref.put(file, { contentType: file.type || 'application/octet-stream' });
+  return snapshot.ref.getDownloadURL();
+}
+
+async function fbDeleteLibraryFile(fileUrl) {
+  try {
+    await fbStorage.refFromURL(fileUrl).delete();
+  } catch (e) {
+    console.warn('fbDeleteLibraryFile:', e);
+  }
+}
+
 /**
  * Mirrors {uid: projectCode} for every project-scoped user (Client Reviewer) into
  * client_access/ — keyed by Firebase Auth uid (not email, which needs awkward

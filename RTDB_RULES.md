@@ -37,6 +37,10 @@ Paste this into Console → Realtime Database → **Rules**, then test with the
       ".read": "auth != null",
       ".write": "auth != null"
     },
+    "report_templates": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
     "issues": {
       "$pid": {
         ".read":  "auth != null && (!root.child('client_access').child(auth.uid).exists() || root.child('client_access').child(auth.uid).val() === $pid)",

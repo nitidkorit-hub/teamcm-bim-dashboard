@@ -14,15 +14,24 @@ const USERS = [
   { id: 1, name: 'Nitid Saksittikan', email: 'nitid_s@teamcm.co.th', role: 'Admin', lastActive: 'just now' }
 ];
 
+// Saved Publish Report configurations (sections + discipline/status filters) — shared, not per-project.
+const REPORT_TEMPLATES = [];
+
+// ─── Library: standards / regulations / internal SOP documents ────────
+// Internal staff only (see isAllowedLibraryReader in app.js) — Admin + BIM Manager can upload/delete.
+const LIBRARY_CATEGORIES = ['กฎหมายอาคาร', 'มาตรฐานวิศวกรรม', 'BIM Standards', 'SOP ภายใน', 'อื่นๆ'];
+const LIBRARY_DOCS = [];
+
 // ─── Role-based Permissions ──────────────────────────────────────────
-// Action keys: create, edit, delete, import, report, users (manage users), comment (leave feedback without edit rights)
+// Action keys: create, edit, delete, import, report, users (manage users), comment (leave feedback without edit rights),
+// library (upload/delete standards & regulations documents — everyone but Client Reviewer can still read the library)
 const PERMISSIONS = {
-  'Admin':           { create: true,  edit: true,  delete: true,  import: true,  report: true,  users: true,  comment: true  },
-  'BIM Manager':     { create: true,  edit: true,  delete: false, import: true,  report: true,  users: false, comment: true  },
-  'Coordinator':     { create: false, edit: true,  delete: false, import: false, report: true,  users: false, comment: true  },
-  'Viewer':          { create: false, edit: false, delete: false, import: false, report: true,  users: false, comment: false },
+  'Admin':           { create: true,  edit: true,  delete: true,  import: true,  report: true,  users: true,  comment: true,  library: true  },
+  'BIM Manager':     { create: true,  edit: true,  delete: false, import: true,  report: true,  users: false, comment: true,  library: true  },
+  'Coordinator':     { create: false, edit: true,  delete: false, import: false, report: true,  users: false, comment: true,  library: false },
+  'Viewer':          { create: false, edit: false, delete: false, import: false, report: true,  users: false, comment: false, library: false },
   // External — project owner / their team. Scoped to a single project via USERS[].projectCode.
-  'Client Reviewer': { create: false, edit: false, delete: false, import: false, report: true,  users: false, comment: true  }
+  'Client Reviewer': { create: false, edit: false, delete: false, import: false, report: true,  users: false, comment: true,  library: false }
 };
 const DEFAULT_ROLE = 'Viewer';   // role for first-time @teamcm.co.th sign-ins
 const DEFAULT_CLIENT_ROLE = 'Client Reviewer'; // role for first-time sign-ins matching a project's clientDomains
