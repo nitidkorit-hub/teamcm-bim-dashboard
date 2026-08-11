@@ -37,9 +37,13 @@ service firebase.storage {
       allow delete: if request.auth != null;
     }
     match /library/{docId}/{fileName} {
-      allow read, write, delete: if request.auth != null &&
-                                     request.auth.token.email.matches('.*@teamcm[.]co[.]th$') &&
-                                     (request.method == 'get' || request.resource.size < 25 * 1024 * 1024);
+      allow read: if request.auth != null &&
+                     request.auth.token.email.matches('.*@teamcm[.]co[.]th$');
+      allow write: if request.auth != null &&
+                      request.auth.token.email.matches('.*@teamcm[.]co[.]th$') &&
+                      request.resource.size < 25 * 1024 * 1024;
+      allow delete: if request.auth != null &&
+                       request.auth.token.email.matches('.*@teamcm[.]co[.]th$');
     }
     match /{allPaths=**} {
       allow read, write: if false;
