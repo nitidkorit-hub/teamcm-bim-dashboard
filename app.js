@@ -2910,33 +2910,52 @@ function exportAnalytics() {
 }
 
 // ============== New Issue / Edit / Delete ==============
+let _issueFormDiscs = [];
+function disciplineChipPicker() {
+  return `<div class="form-row"><label>Discipline * <span style="font-weight:400;color:var(--muted)">(เลือกได้มากกว่า 1)</span></label>
+    <div id="issue-disc-picker" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:2px">
+      ${VALID_DISC_CODES.map(d => {
+        const sel = _issueFormDiscs.includes(d);
+        return `<span data-disc="${d}" onclick="toggleIssueFormDisc('${d}')" style="cursor:pointer;user-select:none;padding:5px 11px;border-radius:14px;font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace;border:1.5px solid ${sel?'var(--blue)':'var(--border)'};background:${sel?'var(--blue)':'transparent'};color:${sel?'#fff':'var(--muted)'}">${d}</span>`;
+      }).join('')}
+    </div>
+  </div>`;
+}
+function toggleIssueFormDisc(code) {
+  const idx = _issueFormDiscs.indexOf(code);
+  if (idx >= 0) _issueFormDiscs.splice(idx, 1);
+  else _issueFormDiscs.push(code);
+  const el = document.querySelector(`#issue-disc-picker [data-disc="${code}"]`);
+  if (!el) return;
+  const sel = _issueFormDiscs.includes(code);
+  el.style.borderColor = sel ? 'var(--blue)' : 'var(--border)';
+  el.style.background = sel ? 'var(--blue)' : 'transparent';
+  el.style.color = sel ? '#fff' : 'var(--muted)';
+}
 function openNewIssue() {
   if (!requirePermission('create', 'สร้าง issue ใหม่')) return;
+  _issueFormDiscs = [];
   openModal(`
     <div class="modal">
       <div class="modal-h"><h3>New Issue</h3><button class="so-close" onclick="closeModal()">${I.close}</button></div>
       <div class="modal-b">
         <div class="form-row"><label>Title *</label><input type="text" id="ni-title" placeholder="เช่น แนวท่อ EE ชนคานหลัก กริด A-2 ชั้น 5F" /></div>
+        ${disciplineChipPicker()}
         <div class="form-row-grid">
-          <div class="form-row"><label>Discipline</label>
-            <select id="ni-disc">${VALID_DISC_CODES.map(d => `<option>${d}</option>`).join('')}</select>
-          </div>
           <div class="form-row"><label>Zone</label>
             <select id="ni-zone"><option>ZONE 1</option><option>ZONE 2</option></select>
           </div>
-        </div>
-        <div class="form-row-grid">
           <div class="form-row"><label>Priority</label>
             <select id="ni-prio"><option>Critical</option><option selected>Major</option><option>Minor</option></select>
           </div>
+        </div>
+        <div class="form-row-grid">
           <div class="form-row"><label>Status</label>
             <select id="ni-status"><option>NEW</option><option>ACTIVE</option><option>RESOLVED</option></select>
           </div>
-        </div>
-        <div class="form-row-grid">
           <div class="form-row"><label>Grid</label><input type="text" id="ni-grid" placeholder="A-2" /></div>
-          <div class="form-row"><label>Floor</label><input type="text" id="ni-floor" placeholder="5F" /></div>
         </div>
+        <div class="form-row"><label>Floor</label><input type="text" id="ni-floor" placeholder="5F" /></div>
         <div class="form-row"><label>Assignee</label>
           <select id="ni-assignee"><option>EE Team</option><option>AC Team</option><option>AR Team</option><option>SN Team</option><option>FP Team</option><option>ST Team</option><option>MEP Lead</option><option>Site Eng.</option><option>Owner</option></select>
         </div>
@@ -2952,13 +2971,14 @@ function saveNewIssue() {
   if (!requirePermission('create', 'สร้าง issue ใหม่')) return;
   const title = $('#ni-title').value.trim();
   if (!title) { toast('⚠️ ใส่ title ก่อน', '#d97706'); return; }
-  const disc = $('#ni-disc').value;
+  if (_issueFormDiscs.length === 0) { toast('⚠️ เลือกอย่างน้อย 1 discipline', '#d97706'); return; }
+  const disc = _issueFormDiscs.join(', ');
   const newNo = String(Math.max(...getIss().map(i => +i.no)) + 1);
   const it = {
     no: newNo,
     title,
     disc,
-    discPrimary: disc,
+    discPrimary: _issueFormDiscs[0],
     zone: $('#ni-zone').value,
     floor: $('#ni-floor').value || '—',
     grid: $('#ni-grid').value || '—',
@@ -2988,26 +3008,23 @@ function openEditIssue(no) {
   if (!requirePermission('edit', 'แก้ไข issue')) return;
   const it = getIss().find(i => i.no === no);
   if (!it) return;
+  _issueFormDiscs = discArray(it.disc);
   openModal(`
     <div class="modal">
       <div class="modal-h"><h3>Edit Issue #${it.no}</h3><button class="so-close" onclick="closeModal()">${I.close}</button></div>
       <div class="modal-b">
         <div class="form-row"><label>Title</label><input type="text" id="ed-title" value="${esc(it.title)}" /></div>
+        ${disciplineChipPicker()}
         <div class="form-row-grid">
-          <div class="form-row"><label>Discipline</label>
-            <select id="ed-disc">${VALID_DISC_CODES.map(d => `<option ${it.discPrimary===d?'selected':''}>${d}</option>`).join('')}</select>
-          </div>
           <div class="form-row"><label>Zone</label>
             <select id="ed-zone"><option ${it.zone==='ZONE 1'?'selected':''}>ZONE 1</option><option ${it.zone==='ZONE 2'?'selected':''}>ZONE 2</option></select>
           </div>
-        </div>
-        <div class="form-row-grid">
           <div class="form-row"><label>Priority</label>
             <select id="ed-prio">${PRIORITIES.map(p => `<option ${it.priority===p?'selected':''}>${p}</option>`).join('')}</select>
           </div>
-          <div class="form-row"><label>Status</label>
-            <select id="ed-status">${STATUSES.map(s => `<option ${it.status===s?'selected':''}>${s}</option>`).join('')}</select>
-          </div>
+        </div>
+        <div class="form-row"><label>Status</label>
+          <select id="ed-status">${STATUSES.map(s => `<option ${it.status===s?'selected':''}>${s}</option>`).join('')}</select>
         </div>
         <div class="form-row"><label>Comment</label><textarea id="ed-comment">${esc(it.comment)}</textarea></div>
       </div>
@@ -3021,9 +3038,10 @@ function saveEditIssue(no) {
   if (!requirePermission('edit', 'แก้ไข issue')) return;
   const it = getIss().find(i => i.no === no);
   if (!it) return;
+  if (_issueFormDiscs.length === 0) { toast('⚠️ เลือกอย่างน้อย 1 discipline', '#d97706'); return; }
   it.title = $('#ed-title').value;
-  it.discPrimary = $('#ed-disc').value;
-  it.disc = $('#ed-disc').value;
+  it.discPrimary = _issueFormDiscs[0];
+  it.disc = _issueFormDiscs.join(', ');
   it.zone = $('#ed-zone').value;
   it.priority = $('#ed-prio').value;
   it.status = $('#ed-status').value;
@@ -3816,7 +3834,7 @@ Object.assign(window, {
   discMSOpen, discMSToggle, discMSSetAll, discMSPreset, toggleReportSection,
   statusMSOpen, statusMSToggle, statusMSSetAll,
   openSaveReportTemplate, saveReportTemplate, applyReportTemplate, deleteReportTemplate,
-  setLibraryFilter, openUploadLibraryDoc, saveLibraryDoc, deleteLibraryDoc,
+  setLibraryFilter, openUploadLibraryDoc, saveLibraryDoc, deleteLibraryDoc, toggleIssueFormDisc,
   previewReport, generatePDF, downloadRecentReport,
   toggleProjMenu, switchProject,
   openEditProject, saveEditProject, confirmDeleteProject, duplicateProject, toggleProjActions, handleEditProjectLogo, updateCoverPos,
