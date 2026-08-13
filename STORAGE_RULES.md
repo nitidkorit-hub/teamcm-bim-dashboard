@@ -41,7 +41,7 @@ service firebase.storage {
                      request.auth.token.email.matches('.*@teamcm[.]co[.]th$');
       allow write: if request.auth != null &&
                       request.auth.token.email.matches('.*@teamcm[.]co[.]th$') &&
-                      request.resource.size < 25 * 1024 * 1024;
+                      request.resource.size < 100 * 1024 * 1024;
       allow delete: if request.auth != null &&
                        request.auth.token.email.matches('.*@teamcm[.]co[.]th$');
     }
@@ -65,5 +65,5 @@ service firebase.storage {
   same category of limitation already noted for `projects`/`users` writes
   in `RTDB_RULES.md`. A Coordinator or Viewer technically could upload via
   the raw SDK; they just can't through the app itself.
-- 25MB size cap on write (regulations/standards PDFs run bigger than the
+- 100MB size cap on write (regulations/standards PDFs run bigger than the
   10MB image cap).

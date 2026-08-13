@@ -1399,7 +1399,7 @@ function openUploadLibraryDoc() {
           </div>
         </div>
         <div class="form-row"><label>File *</label><input type="file" id="ld-file" accept=".pdf,.doc,.docx,.xls,.xlsx,.png,.jpg,.jpeg" /></div>
-        <div style="font-size:11px;color:var(--muted)">ขนาดไม่เกิน 25MB · มองเห็นได้เฉพาะพนักงานภายใน (@teamcm.co.th)</div>
+        <div style="font-size:11px;color:var(--muted)">ขนาดไม่เกิน 100MB · มองเห็นได้เฉพาะพนักงานภายใน (@teamcm.co.th)</div>
       </div>
       <div class="modal-f">
         <button class="btn btn-g" onclick="closeModal()">Cancel</button>
@@ -1412,7 +1412,7 @@ async function saveLibraryDoc() {
   const title = $('#ld-title').value.trim();
   const file = $('#ld-file').files && $('#ld-file').files[0];
   if (!title || !file) { toast('⚠️ ใส่ชื่อเอกสาร + เลือกไฟล์ก่อน', '#d97706'); return; }
-  if (file.size > 25 * 1024 * 1024) { toast('⚠️ ไฟล์ใหญ่เกิน 25MB', '#d97706'); return; }
+  if (file.size > 100 * 1024 * 1024) { toast('⚠️ ไฟล์ใหญ่เกิน 100MB', '#d97706'); return; }
 
   const btn = $('#ld-save-btn');
   if (btn) { btn.disabled = true; btn.style.opacity = '.6'; }
@@ -1436,7 +1436,7 @@ async function saveLibraryDoc() {
     render();
   } catch (e) {
     console.warn('Library upload:', e);
-    toast('❌ อัปโหลดไม่สำเร็จ', '#dc2626');
+    toast(`❌ อัปโหลดไม่สำเร็จ — ${e.message || e}`, '#dc2626');
     if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
   }
 }
