@@ -2399,7 +2399,7 @@ function openSaveReportTemplate() {
       </div>
     </div>`);
 }
-function saveReportTemplate() {
+async function saveReportTemplate() {
   if (!requirePermission('report', 'บันทึก template')) return;
   const name = $('#rt-name').value.trim();
   if (!name) { toast('⚠️ ใส่ชื่อ template ก่อน', '#d97706'); return; }
@@ -2413,9 +2413,18 @@ function saveReportTemplate() {
     createdAt: new Date().toISOString()
   };
   REPORT_TEMPLATES.push(t);
-  fbSaveReportTemplates(REPORT_TEMPLATES).catch(e => console.warn('Firebase report_templates:', e));
   closeModal();
-  toast(`✓ บันทึก template "${name}" แล้ว`, '#2DBE60');
+  try {
+    await fbSaveReportTemplates(REPORT_TEMPLATES);
+    toast(`✓ บันทึก template "${name}" แล้ว`, '#2DBE60');
+  } catch (e) {
+    console.warn('Firebase report_templates:', e);
+    // roll back the optimistic local push — it never actually made it to Firebase,
+    // so keeping it in memory would just disappear on next refresh anyway
+    const idx = REPORT_TEMPLATES.findIndex(x => x.id === t.id);
+    if (idx >= 0) REPORT_TEMPLATES.splice(idx, 1);
+    toast(`❌ บันทึก template ไม่สำเร็จ — ${e.message || e}`, '#dc2626');
+  }
   render();
 }
 function applyReportTemplate(id) {
@@ -2428,14 +2437,20 @@ function applyReportTemplate(id) {
   toast(`✓ ใช้ template "${t.name}"`, '#2DBE60');
   render();
 }
-function deleteReportTemplate(id) {
+async function deleteReportTemplate(id) {
   const t = REPORT_TEMPLATES.find(x => x.id === id);
   if (!t) return;
   if (!confirm(`ลบ template "${t.name}" ?`)) return;
   const idx = REPORT_TEMPLATES.findIndex(x => x.id === id);
   if (idx >= 0) REPORT_TEMPLATES.splice(idx, 1);
-  fbSaveReportTemplates(REPORT_TEMPLATES).catch(e => console.warn('Firebase report_templates:', e));
-  toast(`🗑 ลบ template "${t.name}"`, '#dc2626');
+  try {
+    await fbSaveReportTemplates(REPORT_TEMPLATES);
+    toast(`🗑 ลบ template "${t.name}"`, '#dc2626');
+  } catch (e) {
+    console.warn('Firebase report_templates:', e);
+    if (idx >= 0) REPORT_TEMPLATES.splice(idx, 0, t); // rollback
+    toast(`❌ ลบ template ไม่สำเร็จ — ${e.message || e}`, '#dc2626');
+  }
   render();
 }
 
