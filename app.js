@@ -2629,6 +2629,73 @@ function findImageForIssue(imgMap, issue) {
   return null;
 }
 
+/**
+ * Uploads a queue of {no, dataUrl} images to Cloud Storage. Previously this
+ * ran one upload at a time — fine for a handful of images, but for a bulk
+ * import of hundreds/thousands it could take tens of minutes, long enough
+ * that people reasonably assumed it was done (or stuck) and refreshed —
+ * which loses every image that hadn't finished uploading yet, since nothing
+ * is durable until `it.imageUrl` is saved to RTDB. This runs uploads with
+ * bounded concurrency (much faster), skips any issue that already has a
+ * real (http) imageUrl so re-running after an interruption only retries
+ * what's actually missing, and blocks accidental navigation away mid-upload.
+ */
+async function uploadImageQueue(uploadQueue, projIdx) {
+  const pending = uploadQueue.filter(item => {
+    const it = (PROJECT_ISSUES[projIdx] || []).find(i => i.no === item.no);
+    return !(it && it.imageUrl && it.imageUrl.startsWith('http'));
+  });
+  const skipped = uploadQueue.length - pending.length;
+  if (pending.length === 0) {
+    if (skipped > 0) toast(`✓ รูปทั้งหมด ${skipped} รูปอัปโหลดไว้แล้ว`, '#2DBE60');
+    return { uploaded: 0, failed: 0, skipped };
+  }
+
+  const CONCURRENCY = 6;
+  let uploaded = 0, failed = 0, done = 0;
+  const total = pending.length;
+
+  const beforeUnload = (ev) => { ev.preventDefault(); ev.returnValue = ''; };
+  window.addEventListener('beforeunload', beforeUnload);
+  const report = () => toast(`⬆️ อัปโหลดรูป ${done}/${total} (สำเร็จ ${uploaded}${failed ? ` · ล้มเหลว ${failed}` : ''})… อย่าปิด/รีเฟรชหน้านี้`, '#3A6EA5');
+  report();
+
+  async function worker(items) {
+    for (const item of items) {
+      try {
+        const url = await fbUploadDataUrl(projIdx, item.no, item.dataUrl);
+        setImg(item.no, url);
+        const it = (PROJECT_ISSUES[projIdx] || []).find(i => i.no === item.no);
+        if (it) {
+          it.imageUrl = url;
+          fbSaveIssue(projIdx, it).catch(() => {});
+        }
+        uploaded++;
+      } catch (err) {
+        console.warn('Storage upload failed #' + item.no + ':', err);
+        failed++;
+      }
+      done++;
+      if (done % 10 === 0 || done === total) report();
+    }
+  }
+
+  const chunks = Array.from({ length: Math.min(CONCURRENCY, total) }, () => []);
+  pending.forEach((item, idx) => chunks[idx % chunks.length].push(item));
+  await Promise.all(chunks.map(worker));
+
+  window.removeEventListener('beforeunload', beforeUnload);
+  persistImgs();
+  toast(
+    `✓ อัปโหลดรูป ${uploaded}/${total} ไป Cloud Storage` +
+    (failed ? ` · ล้มเหลว ${failed} (import ซ้ำเพื่อลองใหม่เฉพาะที่ขาด)` : '') +
+    (skipped ? ` · ข้าม ${skipped} ที่มีอยู่แล้ว` : ''),
+    uploaded > 0 || skipped > 0 ? '#2DBE60' : '#d97706'
+  );
+  render();
+  return { uploaded, failed, skipped };
+}
+
 async function handleCsvFile(e) {
   const files = e.target.files;
   if (!files || files.length === 0) return;
@@ -2662,13 +2729,18 @@ async function handleCsvFile(e) {
       return;
     }
     let matched = 0;
+    const uploadQueue = [];
     getIss().forEach(it => {
       const img = findImageForIssue(imgMap, it);
-      if (img) { setImg(it.no, img); matched++; }
+      if (img) {
+        setImg(it.no, img);
+        matched++;
+        uploadQueue.push({ no: it.no, dataUrl: img });
+      }
     });
-    persistImgs();
-    toast(`✓ จับคู่รูปกับ ${matched} issues`, matched > 0 ? '#2DBE60' : '#d97706');
+    toast(`✓ จับคู่รูปกับ ${matched} issues — กำลังอัปโหลดไป Cloud Storage…`, '#3A6EA5');
     render();
+    if (uploadQueue.length > 0) await uploadImageQueue(uploadQueue, state.projIdx);
     return;
   }
 
@@ -2801,11 +2873,13 @@ async function handleCsvFile(e) {
     });
 
     state.notifications = [];
-    // persist any images matched from uploaded ZIP/images
+    // Images are still raw data URLs at this point — persisted properly once
+    // uploadImageQueue() below replaces them with Cloud Storage URLs, so skip
+    // writing them to localStorage now (a bulk import can be hundreds of MB,
+    // well past the ~5-10MB localStorage quota, before they've been uploaded).
     const localImgCount = Object.keys(imgMap).length > 0
       ? getIss().filter(it => getImg(it.no)).length
       : 0;
-    if (localImgCount > 0) persistImgs();
     toast(`✓ Import ${importedCount} issues${localImgCount ? ` · จับคู่รูป ${localImgCount}` : ''}${imageQueue.length ? ` · โหลดเพิ่ม ${imageQueue.length} รูป…` : ''}`, '#2DBE60');
     // Sync all imported issues to RTDB in one batch
     fbSeedIssues(state.projIdx, getIss()).catch(e => console.warn('Firebase seed:', e));
@@ -2813,31 +2887,7 @@ async function handleCsvFile(e) {
     render();
 
     // Upload local images (from ZIP/files) to Cloud Storage for persistence
-    if (uploadQueue.length > 0) {
-      toast(`⬆️ อัปโหลดรูป ${uploadQueue.length} ภาพไป Cloud Storage…`, '#3A6EA5');
-      let uploaded = 0, failed = 0;
-      for (const item of uploadQueue) {
-        try {
-          const url = await fbUploadDataUrl(state.projIdx, item.no, item.dataUrl);
-          // Replace localStorage data URL with public Cloud Storage URL
-          setImg(item.no, url);
-          const it = getIss().find(i => i.no === item.no);
-          if (it) {
-            it.imageUrl = url;
-            fbSaveIssue(state.projIdx, it).catch(() => {});
-          }
-          uploaded++;
-        } catch (e) {
-          console.warn('Storage upload failed #' + item.no + ':', e);
-          failed++;
-        }
-      }
-      persistImgs();
-      toast(
-        `✓ อัปโหลดรูป ${uploaded}/${uploadQueue.length} ไป Cloud Storage` + (failed ? ` · ล้มเหลว ${failed}` : ''),
-        uploaded > 0 ? '#2DBE60' : '#d97706'
-      );
-    }
+    if (uploadQueue.length > 0) await uploadImageQueue(uploadQueue, state.projIdx);
 
     // Fetch images from HTTP URLs in CSV (only those not matched locally)
     if (imageQueue.length > 0) {
