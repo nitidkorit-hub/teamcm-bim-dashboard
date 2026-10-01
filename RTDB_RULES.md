@@ -1,26 +1,17 @@
 # Realtime Database Security Rules
 
-Current published rules only cover one narrow case:
+## Rev B — role is now server-verified, not just trusted from the client
 
-```json
-{
-  "rules": {
-    "issues": {
-      "$pid": { "$no": { ".write": "auth != null" } }
-    }
-  }
-}
-```
+Previously `projects` and `users` were `auth != null` for both read and
+write — any signed-in account, including an external Client Reviewer, could
+write directly to `users` (e.g. set their own `role` to `"Admin"`) via the
+raw SDK from devtools, and the app's own real-time listener would apply it
+to their session immediately. Confirmed exploitable, not theoretical — see
+the audit report. This revision closes that.
 
-Gaps: no `.read` rule anywhere (nothing under `issues` grants read, and
-`projects`/`users`/`audit` have no rules at all), and no project-scoping —
-any authenticated user, including a future Client Reviewer, could read or
-write any project's `issues/$pid`.
-
-## Replacement
-
-Paste this into Console → Realtime Database → **Rules**, then test with the
-**Rules Playground** (top-right of that screen) before hitting **Publish**:
+Paste this into Console → Realtime Database → **Rules**, test in the
+**Rules Playground**, then **Publish** — but read "Rollout order" below
+first, this one has a real bootstrap step.
 
 ```json
 {
@@ -29,13 +20,28 @@ Paste this into Console → Realtime Database → **Rules**, then test with the
       ".read": false,
       ".write": "auth != null"
     },
+    "role_access": {
+      ".read": false,
+      "$uid": {
+        ".write": "auth != null && (root.child('role_access').child(auth.uid).val() === 'Admin' || auth.uid === $uid)",
+        ".validate": "root.child('role_access').child(auth.uid).val() === 'Admin' || newData.val() !== 'Admin'"
+      }
+    },
     "projects": {
       ".read": "auth != null",
-      ".write": "auth != null"
+      ".write": "auth != null && root.child('role_access').child(auth.uid).val() === 'Admin'"
     },
     "users": {
       ".read": "auth != null",
-      ".write": "auth != null"
+      ".write": "auth != null",
+      "$id": {
+        "role": {
+          ".validate": "root.child('role_access').child(auth.uid).val() === 'Admin' || !data.exists() || newData.val() === data.val()"
+        },
+        "projectCode": {
+          ".validate": "root.child('role_access').child(auth.uid).val() === 'Admin' || !data.exists() || newData.val() === data.val()"
+        }
+      }
     },
     "report_templates": {
       ".read": "auth != null",
@@ -43,7 +49,7 @@ Paste this into Console → Realtime Database → **Rules**, then test with the
     },
     "library_docs": {
       ".read": "auth != null",
-      ".write": "auth != null"
+      ".write": "auth != null && (root.child('role_access').child(auth.uid).val() === 'Admin' || root.child('role_access').child(auth.uid).val() === 'BIM Manager')"
     },
     "issues": {
       "$pid": {
@@ -61,37 +67,86 @@ Paste this into Console → Realtime Database → **Rules**, then test with the
 }
 ```
 
-## How the scoping works
+## How it works
 
-`client_access/{uid}` is a new node this app now maintains automatically
-(`fbSyncClientAccess()` in `firebase.js`, called from every `fbSaveUsers()`).
-It mirrors `{firebaseUid: projectCode}` for every Client Reviewer only —
-internal staff never appear in it.
+`role_access/{uid}` is a new mirror node (`fbSetRoleAccess()` in
+`firebase.js`) — `{firebaseUid: role}` for every user, written as a
+**single targeted entry at a time**, never a bulk sync of everyone (that
+distinction matters — see below).
 
-The `issues`/`audit` rules read that node via `root.child(...)`, which rule
-expressions can always do regardless of `.read` permissions elsewhere:
+- **`users/$id/role` and `.../projectCode`** — the only two fields that
+  actually decide what someone can do — can only be *changed* (to a
+  different value than what's stored) by an account whose `role_access`
+  entry already says `"Admin"`. Everything else about a user record
+  (name, email, lastActive) is still freely writable by anyone signed in,
+  matching how self-registration and login already work — this only
+  narrows the two security-relevant fields.
+- **`role_access/{uid}` itself** carries the same protection one level
+  down: you can only write your *own* entry (or anyone's, if you're
+  already an Admin per that same mirror), and you can never set an entry
+  to `"Admin"` unless you already are one. That's what actually stops the
+  self-promotion path, not just the `users` rule alone.
+- **`projects`** now requires `role_access` to say `"Admin"` to write at
+  all (nothing about project management needs a non-admin write path).
+- **`library_docs`** requires `"Admin"` or `"BIM Manager"` — matches
+  `PERMISSIONS.library` in `data.js` exactly, so BIM Managers keep the
+  upload access the app already gives them in the UI.
+- **`issues`/`audit`** project-scoping is unchanged from before.
 
-- **Not in `client_access`** (internal staff) → the `!exists()` branch is
-  true → full access to every project, same as today.
-- **In `client_access` with `client_access/{uid} === $pid`** → access to
-  that one project.
-- **In `client_access` with a different project code** → denied.
+## Why `fbSaveOwnUser()` exists now, separate from `fbSaveUsers()`
 
-## What this does not fix yet
+`fbSaveUsers(USERS)` writes the **entire** user list in one `.set()` — fine
+for an Admin (their `role_access` check passes regardless of which `$id`
+is being touched), but a non-admin session doing that same bulk write
+during ordinary login (refreshing their own `lastActive`) would, under
+these rules, also be attempting to touch *everyone else's* record in the
+same operation — and Realtime Database rules evaluate a multi-child write
+atomically, so the whole thing gets rejected the moment it touches a
+record the caller isn't allowed to touch.
 
-`projects` and `users` are left at `auth != null` for both read and write —
-the same trust level the app already had. That means a Client Reviewer
-could, via the raw SDK (not through the UI, which blocks this), still write
-to `users` or `projects` — e.g. edit another project's name, or attempt to
-change their own role. Closing that needs a second mirror (a role lookup,
-same shape as `client_access`) plus care around the first-login
-self-registration race (a brand-new user has to write themselves into
-`users` before `client_access` exists for them). Worth a follow-up pass if
-you want it — didn't want to bundle it into this change silently.
+`fbSaveOwnUser()` writes only `users/{their own id}` plus their own
+`role_access` entry — used for first-time self-registration and for the
+"just logged in again" refresh. `fbSaveUsers()` stays as-is for the
+admin-driven flows (invite/edit/delete another user), which are already
+gated by `requirePermission('users', ...)` client-side and now backed by
+the real rule server-side too.
+
+## Rollout order — read this before publishing
+
+Publishing the rules above before `role_access` has a real Admin entry in
+it locks *everyone* out of admin actions, including you. Do this in order:
+
+1. **Deploy the app code first** — this adds `fbSetRoleAccess`/
+   `fbSaveOwnUser` without touching the rules yet, so nothing changes
+   behavior-wise until you publish the new rules below.
+2. **Log in as `nitid_s@teamcm.co.th`** (or just reload if already signed
+   in) at least once. Under the *current* (still-permissive) rules, this
+   writes `role_access/{their uid} = "Admin"` for the first time via the
+   existing-user login path.
+3. **Clean up who's Admin today**, while the old permissive rules are
+   still live — open the Users page and set every account that shouldn't
+   be Admin (e.g. `team_tcm001@teamgstart.com`) to a different role. This
+   is the "only `nitid_s@teamcm.co.th` stays Admin" step — do it now,
+   because after step 4 only an existing Admin can change anyone's role
+   at all.
+4. **Now publish the new rules above.** From this point on, only accounts
+   with a confirmed `"Admin"` entry in `role_access` can manage
+   users/projects/library uploads — which, if you did step 3 first, is
+   just `nitid_s@teamcm.co.th`.
+5. Test: log in as `nitid_s@teamcm.co.th`, confirm you can still edit a
+   user's role and edit a project. Then (optionally) try the same as a
+   non-admin account and confirm it's now blocked.
+
+## What this still does not fix
+
+`report_templates` write is still open to everyone (`auth != null`) — a
+Client Reviewer can delete a shared template. Flagged separately in the
+audit report as a small, standalone fix; not bundled in here.
 
 ## One-time note
 
-`client_access` only populates for users who've signed in *after* this
-update (that's when `uid` gets attached to their `USERS` record). Any
-Client Reviewer invited before today will get backfilled automatically on
-their next login — no manual fix needed.
+`client_access` and `role_access` only populate for users who've signed in
+*after* the update that added `uid` to their record. Anyone who hasn't
+logged in since gets backfilled automatically on their next login — no
+manual fix needed, just don't expect a stale, never-logged-in-since
+account to already have a `role_access` entry before they sign in again.

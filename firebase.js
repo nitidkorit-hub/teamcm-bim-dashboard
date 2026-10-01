@@ -132,6 +132,42 @@ async function fbSaveUsers(users) {
   ]);
 }
 
+/**
+ * Writes just the signed-in user's own USERS record (+ their own role_access
+ * mirror entry) — used for self-registration on first login and for
+ * refreshing lastActive/displayName on return visits. Deliberately NOT
+ * fbSaveUsers(): that writes the whole org's user list in one call, which a
+ * non-admin session touching only their own record has no business doing —
+ * and under the role-gated rules below, a bulk write like that from a
+ * non-admin is rejected outright once it touches anyone else's row.
+ */
+async function fbSaveOwnUser(userRecord) {
+  return Promise.all([
+    fbDb.ref('users/' + userRecord.id).set(userRecord),
+    fbSetRoleAccess(userRecord.uid, userRecord.role)
+  ]);
+}
+
+/**
+ * Mirrors one user's {uid: role} into role_access/ — a single targeted write,
+ * never a bulk sync. Security Rules can't look up a user's role from the
+ * `users` node by field value, only by direct key lookup, so this gives rules
+ * a uid-keyed node to check `root.child('role_access').child(auth.uid)`
+ * against (same reasoning as the existing client_access mirror). Lets
+ * `projects`/`library_docs` rules — and the `role`/`projectCode` fields
+ * inside `users` — require a real, server-verified role instead of trusting
+ * the client's state.user.role.
+ */
+async function fbSetRoleAccess(uid, role) {
+  if (!uid || !role) return;
+  return fbDb.ref('role_access/' + uid).set(role);
+}
+
+async function fbRemoveRoleAccess(uid) {
+  if (!uid) return;
+  return fbDb.ref('role_access/' + uid).remove();
+}
+
 // ─── Report Templates (Realtime Database) ─────────────────────────────
 // Shared across projects — a saved combination of sections/discipline/status
 // filters from the Publish Report page, so it doesn't need to be rebuilt

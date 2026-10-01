@@ -74,7 +74,7 @@ const I = {
 };
 
 // Discipline color lookup
-const DISC_COLOR = { AC:'#0ea5e9', EE:'#f59e0b', AR:'#8b5cf6', SN:'#06b6d4', FP:'#ef4444', ST:'#64748b', LA:'#10b981', IN:'#ec4899', OWNER:'#4338ca' };
+const DISC_COLOR = { AC:'#0ea5e9', EE:'#f59e0b', AR:'#8b5cf6', SN:'#06b6d4', FP:'#ef4444', ST:'#64748b', LA:'#10b981', IN:'#ec4899', OWNER:'#4338ca', CM:'#d946ef', MG:'#84cc16' };
 const STATUS_COLOR = { RESOLVED:'#2DBE60', ACTIVE:'#3A6EA5', NEW:'#9333ea', Unknown:'#94a3b8' };
 const PRIO_COLOR = { Critical:'#dc2626', Major:'#ea7f00', Minor:'#6b7280' };
 
@@ -1463,7 +1463,7 @@ function renderClashes() {
 }
 
 function clashMatrix() {
-  const discs = ['AC','EE','AR','SN','FP','ST','LA','IN'];
+  const discs = ['AC','EE','AR','SN','FP','ST','LA','IN','CM','MG'];
   // synthetic counts based on cross-disc occurrences
   const grid = {};
   getIss().forEach(it => {
@@ -1556,7 +1556,7 @@ function openDetail(no) {
           {ts: formatDateTime(it.createdAt), tlAction: `สร้าง issue โดย ${it.author}`},
           {ts: formatDateTime(it.createdAt).replace(/(\d+):(\d+)/, (m,h,mn)=>`${h}:${String(Math.min(59,+mn+15)).padStart(2,'0')}`), tlAction: `Assigned to ${it.assignee}`}
         ]).map(a => `<div class="tl-item">
-          <div class="tl-action">${a.tlAction || a.action + ' — ' + (a.newVal||'')}</div>
+          <div class="tl-action">${esc(a.tlAction || (a.action + ' — ' + (a.newVal||'')))}</div>
           <div class="tl-meta">${esc(a.ts)} · ${esc(a.user || it.author)}</div>
         </div>`).join('')}
       </div>
@@ -1925,7 +1925,7 @@ async function handleAuthStateChange(firebaseUser) {
       lastActive: 'just now'
     };
     USERS.push(userRecord);
-    fbSaveUsers(USERS).catch(e => console.warn('Auto-add user:', e));
+    fbSaveOwnUser(userRecord).catch(e => console.warn('Auto-add user:', e));
     toast(clientProject
       ? `👋 ยินดีต้อนรับ ${displayName} — เข้าดูโครงการ ${clientProject.name} ในฐานะ ${DEFAULT_CLIENT_ROLE}`
       : `👋 ยินดีต้อนรับ ${displayName} — ได้รับสิทธิ์ ${DEFAULT_ROLE}`, '#3A6EA5');
@@ -1937,7 +1937,7 @@ async function handleAuthStateChange(firebaseUser) {
     // Backfill uid for users who signed in before this field existed.
     if (!userRecord.uid) userRecord.uid = firebaseUser.uid;
     userRecord.lastActive = 'just now';
-    fbSaveUsers(USERS).catch(() => {});
+    fbSaveOwnUser(userRecord).catch(() => {});
   }
 
   // Set state.user — role comes from USERS record (not hardcoded)
@@ -2263,6 +2263,8 @@ function renderDiscMultiSelect() {
     { key:'FP', label:'FP — Fire Protection' },
     { key:'LA', label:'LA — Landscape' },
     { key:'IN', label:'IN — Interior' },
+    { key:'CM', label:'CM — Construction Management' },
+    { key:'MG', label:'MG — Management' },
     { key:'OWNER', label:'OWNER — รอการตัดสินใจจากเจ้าของโครงการ' }
   ];
   const selected = state.reportOpts.disciplines;
@@ -2531,7 +2533,7 @@ async function extractZipToImgMap(arrayBuffer, imgMap) {
 }
 
 // Valid TEAM·CM discipline codes
-const VALID_DISC_CODES = ['EE','AC','AR','SN','FP','ST','LA','IN','OWNER'];
+const VALID_DISC_CODES = ['EE','AC','AR','SN','FP','ST','LA','IN','OWNER','CM','MG'];
 
 // Extract discipline from TEAM·CM title pattern: {runNo}_{issNo}_{date}_{zone}_{disc}_...
 function extractDiscFromTitle(title) {
@@ -2669,7 +2671,8 @@ async function handleCsvFile(e) {
       author:   header.findIndex(h => h.includes('author')),
       assignee: header.findIndex(h => h.includes('assignee')),
       daysOpen: header.findIndex(h => h.includes('days')),
-      imageUrl: header.findIndex(h => h.includes('image') || h.includes('hyperlink') || (h.includes('link') && !h.includes('discipline')))
+      imageUrl: header.findIndex(h => h.includes('image') || h.includes('hyperlink') || (h.includes('link') && !h.includes('discipline'))),
+      created:  header.findIndex(h => h === 'created' || h.includes('created'))
     };
 
     // Detect TEAM·CM CSV format: individual discipline columns (AR, ST, LA, IN, SN, AC, EE, FP)
@@ -2730,7 +2733,11 @@ async function handleCsvFile(e) {
         daysOpen:   parseInt(get(row, col.daysOpen, '0')) || 0,
         author:     get(row, col.author,   state.user.name),
         assignee:   get(row, col.assignee, discPrimary + ' Team'),
-        createdAt:  new Date().toISOString()
+        createdAt:  (() => {
+          const raw = get(row, col.created, '');
+          const d = raw ? new Date(raw) : null;
+          return (d && !isNaN(d)) ? d.toISOString() : new Date().toISOString();
+        })()
       };
 
       if (existingIdx >= 0) {
@@ -3543,6 +3550,7 @@ function saveUserEdit(id) {
     fbAddAudit(state.projIdx, getAud()[0]).catch(() => {});
   }
   fbSaveUsers(USERS).catch(e => console.warn('Firebase users:', e));
+  if (u.uid) fbSetRoleAccess(u.uid, role).catch(e => console.warn('Firebase role_access:', e));
   closeModal();
   toast(`✓ อัปเดต ${name} → ${role}`, '#2DBE60');
   render();
@@ -3556,6 +3564,7 @@ function confirmDeleteUser(id) {
   const idx = USERS.findIndex(x => x.id === id);
   if (idx >= 0) USERS.splice(idx, 1);
   fbSaveUsers(USERS).catch(e => console.warn('Firebase users:', e));
+  if (u.uid) fbRemoveRoleAccess(u.uid).catch(e => console.warn('Firebase role_access:', e));
   closeModal();
   toast(`🗑 ลบ ${u.name}`, '#dc2626');
   render();
