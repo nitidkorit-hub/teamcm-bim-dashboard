@@ -1638,6 +1638,29 @@ function goPage(p) {
   state.selected.clear();
   render();
   window.scrollTo(0,0);
+  if (p === 'projects') ensureAllProjectCountsLoaded();
+}
+
+/**
+ * The Projects overview cards read PROJECT_ISSUES[i], which is normally only
+ * populated for the one active project (switching projects is what triggers
+ * a load). Without this, every other project's card shows 0 issues until
+ * someone actually opens it. Fetches a one-time snapshot (not a live
+ * subscription — this page doesn't need per-second updates) for whichever
+ * projects haven't been loaded into this session yet, then re-renders.
+ */
+async function ensureAllProjectCountsLoaded() {
+  const missing = PROJECTS.map((p, i) => i).filter(i => PROJECT_ISSUES[i] === undefined);
+  if (missing.length === 0) return;
+  await Promise.all(missing.map(async i => {
+    try {
+      PROJECT_ISSUES[i] = (await fbLoadIssues(i)) || [];
+    } catch (e) {
+      console.warn('Load issue count for project', i, e);
+      PROJECT_ISSUES[i] = [];
+    }
+  }));
+  if (state.page === 'projects') render();
 }
 function setFilter(key, val) {
   state.filters[key] = val;
