@@ -74,7 +74,7 @@ const I = {
 };
 
 // Discipline color lookup
-const DISC_COLOR = { AC:'#0ea5e9', EE:'#f59e0b', AR:'#8b5cf6', SN:'#06b6d4', FP:'#ef4444', ST:'#64748b', LA:'#10b981', IN:'#ec4899', OWNER:'#4338ca', CM:'#d946ef', MG:'#84cc16' };
+const DISC_COLOR = { AC:'#0ea5e9', EE:'#f59e0b', AR:'#8b5cf6', SN:'#06b6d4', FP:'#ef4444', ST:'#64748b', LA:'#10b981', IN:'#ec4899', OWNER:'#4338ca', CM:'#d946ef', MG:'#84cc16', MEP:'#f43f5e', PMC:'#0891b2', FACADE:'#a855f7', CHK:'#ca8a04', SW:'#15803d' };
 const STATUS_COLOR = { RESOLVED:'#2DBE60', ACTIVE:'#3A6EA5', NEW:'#9333ea', Unknown:'#94a3b8' };
 const PRIO_COLOR = { Critical:'#dc2626', Major:'#ea7f00', Minor:'#6b7280' };
 
@@ -1463,7 +1463,7 @@ function renderClashes() {
 }
 
 function clashMatrix() {
-  const discs = ['AC','EE','AR','SN','FP','ST','LA','IN','CM','MG'];
+  const discs = ['AC','EE','AR','SN','FP','ST','LA','IN','CM','MG','MEP','PMC','FACADE','CHK','SW'];
   // synthetic counts based on cross-disc occurrences
   const grid = {};
   getIss().forEach(it => {
@@ -2265,6 +2265,11 @@ function renderDiscMultiSelect() {
     { key:'IN', label:'IN — Interior' },
     { key:'CM', label:'CM — Construction Management' },
     { key:'MG', label:'MG — Management' },
+    { key:'MEP', label:'MEP — Mechanical/Electrical/Plumbing (รวมสาขา)' },
+    { key:'PMC', label:'PMC — Project Management Consultant' },
+    { key:'FACADE', label:'FACADE — งานผนังภายนอกอาคาร' },
+    { key:'CHK', label:'CHK — Check/QC' },
+    { key:'SW', label:'SW — Shop Drawing' },
     { key:'OWNER', label:'OWNER — รอการตัดสินใจจากเจ้าของโครงการ' }
   ];
   const selected = state.reportOpts.disciplines;
@@ -2533,7 +2538,7 @@ async function extractZipToImgMap(arrayBuffer, imgMap) {
 }
 
 // Valid TEAM·CM discipline codes
-const VALID_DISC_CODES = ['EE','AC','AR','SN','FP','ST','LA','IN','OWNER','CM','MG'];
+const VALID_DISC_CODES = ['EE','AC','AR','SN','FP','ST','LA','IN','OWNER','CM','MG','MEP','PMC','FACADE','CHK','SW'];
 
 // Extract discipline from TEAM·CM title pattern: {runNo}_{issNo}_{date}_{zone}_{disc}_...
 function extractDiscFromTitle(title) {
