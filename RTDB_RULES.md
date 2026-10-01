@@ -1,5 +1,49 @@
 # Realtime Database Security Rules
 
+## Rev C — fixes a self-bootstrap lockout in Rev B
+
+**If you published Rev B and then found project/user create-or-delete
+"succeeds" in the UI but reverts after a page reload: this is why, and this
+revision fixes it.**
+
+Rev B's `role_access/$uid` `.validate` rule was:
+
+```
+"root.child('role_access').child(auth.uid).val() === 'Admin' || newData.val() !== 'Admin'"
+```
+
+The `.write` rule lets you write your *own* uid's entry at any time
+(`auth.uid === $uid`), which was meant to let `nitid_s@teamcm.co.th` bootstrap
+their own `role_access` entry to `"Admin"` on first login, before anyone
+else could. But `.validate` runs independently and checks the pre-write
+value at that same path — which, for a genuinely first-ever write, is
+`null`, not `"Admin"`. So the very write meant to *create* the first Admin
+entry fails its own validation: neither side of the OR is true. If that
+bootstrap login didn't happen (or didn't persist) before Rev B was
+published, there is no path back to Admin through the app at all — every
+write that needs `role_access` to already say `"Admin"` now fails silently
+(caught by a `.catch()`, so the UI's local state updates optimistically
+and then reverts on the next reload once the real data reloads from
+Firebase).
+
+**The fix**: add a permanent, narrowly-scoped escape hatch for the one
+real owner account, so this can never lock out for good:
+
+```
+"root.child('role_access').child(auth.uid).val() === 'Admin' || newData.val() !== 'Admin' || auth.token.email === 'nitid_s@teamcm.co.th'"
+```
+
+This only ever matters for setting a `role_access` entry **to** `"Admin"`
+specifically for `nitid_s@teamcm.co.th`'s own signed-in session — it does
+not grant that email anything it doesn't already have as the account this
+whole rewrite was built to protect, and it does not touch any other path
+or field.
+
+Paste the rules below into Console → Realtime Database → **Rules**, test
+in the **Rules Playground**, then **Publish** — this time there's no
+rollout-order risk, since the one case that used to require perfect
+ordering now has a permanent fallback.
+
 ## Rev B — role is now server-verified, not just trusted from the client
 
 Previously `projects` and `users` were `auth != null` for both read and
@@ -24,7 +68,7 @@ first, this one has a real bootstrap step.
       ".read": false,
       "$uid": {
         ".write": "auth != null && (root.child('role_access').child(auth.uid).val() === 'Admin' || auth.uid === $uid)",
-        ".validate": "root.child('role_access').child(auth.uid).val() === 'Admin' || newData.val() !== 'Admin'"
+        ".validate": "root.child('role_access').child(auth.uid).val() === 'Admin' || newData.val() !== 'Admin' || auth.token.email === 'nitid_s@teamcm.co.th'"
       }
     },
     "projects": {
