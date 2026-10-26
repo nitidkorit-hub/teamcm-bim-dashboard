@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' file:; script-src 'self' file: 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' file: 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' file: data: blob:; connect-src 'self' file:">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 rx=%276%27 fill=%27%23163b6b%27/%3E%3Ctext x=%2716%27 y=%2722%27 font-size=%2716%27 font-family=%27Arial%27 font-weight=%27bold%27 fill=%27white%27 text-anchor=%27middle%27%3ESD%3C/text%3E%3C/svg%3E">
+<title>Structural Design - โปรแกรมช่วยวิเคราะห์และออกแบบโครงสร้าง</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<header id="app-header" class="no-print">
+  <div class="brand">
+    <span class="brand-mark">SD</span>
+    <div>
+      <div class="brand-title">Structural Design</div>
+      <div class="brand-sub">วิเคราะห์และออกแบบโครงสร้าง 3 มิติ - เครื่องมือช่วยคำนวณ</div>
+    </div>
+  </div>
+  <div class="header-actions">
+    <span id="engine-status" class="pill pill-warn" title="สถานะ engine">engine: -</span>
+    <span id="save-status" class="muted small"></span>
+    <button type="button" id="btn-new" class="btn">โครงการใหม่</button>
+    <button type="button" id="btn-export" class="btn">ส่งออก JSON</button>
+    <button type="button" id="btn-import" class="btn">นำเข้า JSON</button>
+    <input type="file" id="file-import" accept=".json,application/json" hidden>
+  </div>
+</header>
+
+<nav id="tabs" class="no-print" role="tablist" aria-label="ขั้นตอนการทำงาน">
+  <button type="button" role="tab" data-tab="project" class="tab active">1. โครงการ</button>
+  <button type="button" role="tab" data-tab="model" class="tab">2. โมเดล</button>
+  <button type="button" role="tab" data-tab="loads" class="tab">3. น้ำหนักบรรทุก</button>
+  <button type="button" role="tab" data-tab="analysis" class="tab">4. วิเคราะห์</button>
+  <button type="button" role="tab" data-tab="design" class="tab">5. ออกแบบ</button>
+  <button type="button" role="tab" data-tab="codes" class="tab">6. มาตรฐาน/กฎหมาย</button>
+  <button type="button" role="tab" data-tab="report" class="tab">7. รายการคำนวณ</button>
+</nav>
+
+<div id="stale-banner" class="banner banner-warn no-print" hidden>
+  แบบจำลองหรือน้ำหนักบรรทุกมีการแก้ไขหลังการวิเคราะห์ครั้งล่าสุด - ผลวิเคราะห์/ผลออกแบบอาจล้าสมัย กรุณารันวิเคราะห์ใหม่
+</div>
+
+<main id="main">
+  <section id="tab-project" class="tab-panel active" role="tabpanel"></section>
+  <section id="tab-model" class="tab-panel" role="tabpanel" hidden></section>
+  <section id="tab-loads" class="tab-panel" role="tabpanel" hidden></section>
+  <section id="tab-analysis" class="tab-panel" role="tabpanel" hidden></section>
+  <section id="tab-design" class="tab-panel" role="tabpanel" hidden></section>
+  <section id="tab-codes" class="tab-panel" role="tabpanel" hidden></section>
+  <section id="tab-report" class="tab-panel" role="tabpanel" hidden></section>
+</main>
+
+<dialog id="dlg-verify" class="no-print">
+  <form method="dialog" id="form-verify">
+    <h3>บันทึกการตรวจสอบมาตรฐาน</h3>
+    <p class="muted small" id="dlg-verify-title"></p>
+    <label class="field"><span>ผู้ตรวจสอบ (verifiedBy)</span><input type="text" name="by" required maxlength="120"></label>
+    <label class="field"><span>วันที่ตรวจสอบ</span><input type="date" name="date" required></label>
+    <label class="field"><span>หมายเหตุ / แหล่งที่ตรวจ</span><textarea name="notes" rows="3" maxlength="500"></textarea></label>
+    <p class="muted small">บันทึกนี้เก็บในโครงการนี้เท่านั้น ไม่แก้ไขข้อมูลมาตรฐานที่มากับโปรแกรม</p>
+    <div class="dlg-actions">
+      <button type="button" class="btn" id="dlg-verify-cancel">ยกเลิก</button>
+      <button type="submit" class="btn btn-primary" value="ok">บันทึก</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="busy" class="busy no-print" hidden><div class="spinner"></div><div id="busy-text">กำลังประมวลผล...</div></div>
+<div id="toast" class="toast no-print" hidden></div>
+
+<!-- Engine (classic scripts, order matters) -->
+<script src="engine/core.js"></script>
+<script src="engine/data/codes.js"></script>
+<script src="engine/data/materials.js"></script>
+<script src="engine/data/sections.js"></script>
+<script src="engine/data/provinces.js"></script>
+<script src="engine/solver3d.js"></script>
+<script src="engine/loads.js"></script>
+<script src="engine/rc.js"></script>
+<script src="engine/steel.js"></script>
+<!-- UI -->
+<script src="report.js"></script>
+<script src="app.js"></script>
+<script type="module" src="viewer3d.js"></script>
+</body>
+</html>
