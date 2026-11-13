@@ -297,8 +297,16 @@ function zoneAdd() {
 }
 function zoneSetDate(i, v) {
   if (!requirePermission('users', 'แก้ Zone')) return;
-  PROJECTS[state.projIdx].zones[i].freezeDate = v || '';
-  _saveZones();
+  // Typing a date by keyboard fires `change` as soon as the year is *any* valid number (0002…),
+  // and re-rendering the page then destroys the input mid-typing. So: ignore half-typed years,
+  // and don't re-render — just save, re-derive ACTIVE DELAY and confirm with a toast.
+  if (v && !/^20\d{2}-\d{2}-\d{2}$/.test(v)) return;
+  const z = PROJECTS[state.projIdx].zones[i];
+  z.freezeDate = v || '';
+  fbSaveProjects(PROJECTS)
+    .then(() => toast(`✓ บันทึก Freeze date ของ "${z.name}" แล้ว${v ? ' · ' + isoToDMY(v) : ' (ล้างวันที่)'}`, '#2DBE60'))
+    .catch(saveFail('Freeze date'));
+  reapplyAutoDelay();
 }
 function zoneRemove(i) {
   if (!requirePermission('users', 'แก้ Zone')) return;
