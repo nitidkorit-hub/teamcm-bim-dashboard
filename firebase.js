@@ -162,8 +162,16 @@ async function fbSaveOwnUser(userRecord) {
   // entry, with the least-privileged role. Anything beyond that (promotions, existing entries)
   // is applied by an Admin session via fbReconcileAccess(), so a rejection here is expected.
   if (userRecord.uid) {
-    const selfRole = userRecord.role === 'Client Reviewer' ? 'Client Reviewer' : 'Viewer';
-    fbDb.ref('role_access/' + userRecord.uid).set(selfRole).catch(() => {});
+    // Only ever once per browser, and never for an Admin: under the older rules (Rev C) this write
+    // is allowed to *overwrite*, and a re-login would otherwise downgrade an Admin's own entry.
+    const flag = 'tcm_ra_' + userRecord.uid;
+    let done = false;
+    try { done = localStorage.getItem(flag) === '1'; } catch (e) {}
+    if (!done && userRecord.role !== 'Admin') {
+      const selfRole = userRecord.role === 'Client Reviewer' ? 'Client Reviewer' : 'Viewer';
+      fbDb.ref('role_access/' + userRecord.uid).set(selfRole).catch(() => {});
+      try { localStorage.setItem(flag, '1'); } catch (e) {}
+    }
     if (userRecord.projectCode) {
       fbDb.ref('client_access/' + userRecord.uid).set(userRecord.projectCode).catch(() => {});
     }
