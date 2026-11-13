@@ -86,9 +86,6 @@ const DISC_TITLES = {
   IN: [ 'Interior IN built-in ขัดแนวท่อ EE conduit' ]
 };
 
-const ZONES = ['ZONE 1','ZONE 2'];
-const PRIORITIES = ['Critical','Major','Minor'];
-const STATUSES = ['NEW','ACTIVE','RESOLVED','Unknown'];
 const COMMENTS = {
   EE: 'ให้ทีม EE ปรับแนว conduit หลบคาน ตามที่ตกลงในประชุม 25 Apr',
   AC: 'ให้ทีม AC ปรับ duct routing หลบโครงสร้าง รอตอบกลับภายใน 30 Apr',
@@ -296,31 +293,6 @@ const PROJECT_AUDIT = { 0: AUDIT_LOG.slice(0, 5), 1: [] };
     });
   });
 });
-
-// Burndown data — 14 days, simulating resolution velocity
-// Each day: { date, opened, resolved, openTotal }
-const BURNDOWN = (function(){
-  const out = [];
-  let openTotal = 89; // 14 days ago we had 89 open
-  // We've been resolving issues and creating new ones; today open = ACTIVE+NEW+Unknown
-  const todayOpen = ISSUES.filter(i => i.status !== 'RESOLVED').length; // 89
-  for (let d = 13; d >= 0; d--) {
-    const date = new Date('2026-04-29');
-    date.setDate(date.getDate() - d);
-    // simulate some activity
-    const opened = 3 + Math.floor(rand()*8);
-    const resolved = 2 + Math.floor(rand()*7);
-    openTotal = Math.max(0, openTotal + opened - resolved);
-    out.push({
-      date,
-      label: `${String(date.getDate()).padStart(2,'0')}/${String(date.getMonth()+1).padStart(2,'0')}`,
-      opened, resolved, openTotal
-    });
-  }
-  // force last value to match real today
-  out[out.length-1].openTotal = todayOpen;
-  return out;
-})();
 
 // 12-week trend for analytics
 const TREND_12W = (function(){

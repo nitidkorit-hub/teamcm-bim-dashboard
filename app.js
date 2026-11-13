@@ -18,7 +18,8 @@ const state = {
   theme: localStorage.getItem('tcm_theme') || 'light',
   imgStore: (function(){ try { return JSON.parse(localStorage.getItem('tcm_imgs') || '{}'); } catch(e){ return {}; } })(),
   notifications: [],
-  reportOpts: { disciplines: [], statuses: [], sections: ['cover','exec','charts','cards'] },
+  reportOpts: { disciplines: [], statuses: [], sections: ['cover','exec','charts','cards'], sortBy: 'priority', sortDir: 'asc' },
+  online: true,
   libraryFilter: { category: 'all', q: '' }
 };
 
@@ -32,15 +33,21 @@ function getVisibleProjects() {
 }
 function getIss() { return PROJECT_ISSUES[state.projIdx] || PROJECT_ISSUES[0]; }
 function getAud() { return PROJECT_AUDIT[state.projIdx] || PROJECT_AUDIT[0]; }
-/** Distinct zones in the current project, natural-sorted (01_… before 02_…). Falls back to ZONE 1/2 for an empty project. */
-function zoneOptions(selected) {
-  const set = new Set(getIss().map(i => i.zone).filter(Boolean));
-  if (selected && selected !== 'all') set.add(selected);
+/** Zones configured on the project (Master Data) plus any zone actually used by an issue, natural-sorted. Falls back to ZONE 1/2 for an empty project. */
+function zoneNames(extra) {
+  const set = new Set(((PROJECTS[state.projIdx] || {}).zones || []).map(z => z.name).filter(Boolean));
+  getIss().forEach(i => { if (i.zone) set.add(i.zone); });
+  if (extra && extra !== 'all') set.add(extra);
   if (set.size === 0) { set.add('ZONE 1'); set.add('ZONE 2'); }
-  return [...set]
-    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-    .map(z => `<option value="${esc(z)}" ${z === selected ? 'selected' : ''}>${esc(z)}</option>`)
-    .join('');
+  return [...set].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+function zoneOptions(selected) {
+  return zoneNames(selected).map(z => `<option value="${esc(z)}" ${z === selected ? 'selected' : ''}>${esc(z)}</option>`).join('');
+}
+/** <option> list from a master-data array, keeping a legacy value selectable if an issue still has it. */
+function masterOptions(list, selected, labelFn) {
+  const vals = selected && !list.includes(selected) ? [...list, selected] : list;
+  return vals.map(v => `<option value="${esc(v)}" ${v === selected ? 'selected' : ''}>${esc(labelFn ? labelFn(v) : v)}</option>`).join('');
 }
 function imgKey(no) { return `p${state.projIdx}_${no}`; }
 function getImg(no) { return state.imgStore[imgKey(no)] || state.imgStore[no]; /* fallback for legacy keys */ }
@@ -84,24 +91,34 @@ const I = {
 };
 
 // Discipline color lookup
-const DISC_COLOR = { AC:'#0ea5e9', EE:'#f59e0b', AR:'#8b5cf6', SN:'#06b6d4', FP:'#ef4444', ST:'#64748b', LA:'#10b981', IN:'#ec4899', OWNER:'#4338ca', CM:'#d946ef', MG:'#84cc16', MEP:'#f43f5e', PMC:'#0891b2', FACADE:'#a855f7', CHK:'#ca8a04', SW:'#15803d' };
-const STATUS_COLOR = { RESOLVED:'#2DBE60', ACTIVE:'#3A6EA5', NEW:'#9333ea', Unknown:'#94a3b8' };
-const PRIO_COLOR = { Critical:'#dc2626', Major:'#ea7f00', Minor:'#6b7280' };
+const DISC_COLOR = { AR:'#8b5cf6', FA:'#a855f7', ST:'#64748b', LA:'#10b981', MEP:'#f43f5e', IN:'#ec4899', CM:'#d946ef', OWNER:'#4338ca', AC:'#0ea5e9', EE:'#f59e0b', SN:'#06b6d4', FP:'#ef4444', MG:'#84cc16', PMC:'#0891b2', FACADE:'#a855f7', CHK:'#ca8a04', SW:'#15803d' };
+const STATUS_COLOR = { 'NEW':'#9333ea', 'ACTIVE':'#3A6EA5', 'ACTIVE DELAY':'#e11d48', 'RESOLVED':'#2DBE60', 'APPROVED':'#0d9488', Unknown:'#94a3b8' };
+const PRIO_COLOR = { Major:'#ea7f00', Minor:'#6b7280', Critical:'#ea7f00' };
+const statusColor = (s) => STATUS_COLOR[s] || '#64748b';
 
 // ===== Helpers =====
-function priBadge(p) { const cls = p==='Critical'?'b-critical':p==='Major'?'b-major':'b-minor'; return `<span class="badge ${cls}"><span class="dot"></span>${p}</span>`; }
-function stBadge(s) { const cls = s==='RESOLVED'?'b-resolved':s==='ACTIVE'?'b-active':s==='NEW'?'b-new':'b-unknown'; return `<span class="badge ${cls}">${s}</span>`; }
-function discBadge(d) { return `<span class="badge b-${d.toLowerCase()}">${d}</span>`; }
-function discArray(s) { return String(s).split(',').map(d => d.trim()).filter(Boolean); }
+function priBadge(p) { const cls = (p==='Major'||p==='Critical')?'b-major':'b-minor'; return `<span class="badge ${cls}"><span class="dot"></span>${esc(p)}</span>`; }
+function stBadge(s) {
+  const cls = s==='RESOLVED'?'b-resolved':s==='ACTIVE'?'b-active':s==='ACTIVE DELAY'?'b-delay':s==='APPROVED'?'b-approved':s==='NEW'?'b-new':'b-unknown';
+  return `<span class="badge ${cls}">${esc(s)}</span>`;
+}
+function discBadge(d) { return `<span class="badge b-${d.toLowerCase()}">${esc(d)}</span>`; }
+// Legacy codes (EE/AC/SN/FP → MEP, FACADE → FA, …) are folded into the main disciplines here,
+// so every list, filter, chart and report sees the same codes without rewriting stored data.
+function discArray(s) {
+  const out = [];
+  String(s || '').split(',').map(d => mainDisc(d)).filter(Boolean).forEach(d => { if (!out.includes(d)) out.push(d); });
+  return out;
+}
 function discBadges(s) { return `<div class="disc-list">${discArray(s).map(discBadge).join('')}</div>`; }
 
-function toast(msg, color) {
+function toast(msg, color, ms) {
   const t = $('#toast');
   t.textContent = msg;
   if (color) t.style.background = color; else t.style.background = '';
   t.classList.add('show');
   clearTimeout(toast._tm);
-  toast._tm = setTimeout(()=>t.classList.remove('show'), 2200);
+  toast._tm = setTimeout(()=>t.classList.remove('show'), ms || 2200);
 }
 
 // ===== Role-based permissions =====
@@ -165,7 +182,7 @@ function donutLegend(items, total) {
 function barChart(items) {
   const max = Math.max(...items.map(i => i.value), 1);
   return `<div class="bar-chart">${items.map(it => `
-    <div class="bar-row">
+    <div class="bar-row"${it.onclick ? ` style="cursor:pointer" title="คลิกดูแยกตาม Zone" onclick="${it.onclick}"` : ''}>
       <span class="bar-lbl">${esc(it.label)}</span>
       <div class="bar-track"><div class="bar-fill" style="width:${(it.value/max*100).toFixed(1)}%;background:${it.color}">${it.value>=6?it.value:''}</div></div>
       <span class="bar-num">${it.value<6?it.value:''}</span>
@@ -181,6 +198,17 @@ function tally(arr, key) {
   });
   return m;
 }
+/** Donut/legend items in master-data order, plus any value found in the data but not in the list. */
+function statusItems(tl) {
+  const keys = [...statusList()];
+  Object.keys(tl).forEach(k => { if (!keys.includes(k)) keys.push(k); });
+  return keys.map(s => ({ label: s, value: tl[s] || 0, color: statusColor(s) }));
+}
+function priorityItems(tl) {
+  const keys = [...priorityList()];
+  Object.keys(tl).forEach(k => { if (!keys.includes(k)) keys.push(k); });
+  return keys.map(p => ({ label: p, value: tl[p] || 0, color: PRIO_COLOR[p] || '#6b7280' }));
+}
 function tallyDisc(arr) {
   const m = {};
   arr.forEach(it => {
@@ -190,11 +218,7 @@ function tallyDisc(arr) {
 }
 
 function renderSidebar() {
-  const counts = {
-    issues: getIss().length,
-    new: getIss().filter(i => i.status==='NEW').length,
-    active: getIss().filter(i => i.status==='ACTIVE').length
-  };
+  const counts = { issues: getIss().length };
   return `<aside class="sb">
     <div class="sb-brand">
       <div class="sb-logo">TCM</div>
@@ -221,10 +245,11 @@ function renderSidebar() {
     <div class="sb-sec">Management</div>
     <div class="ni ${state.page==='projects'?'active':''}" data-page="projects">${I.projects}<span>Projects</span></div>
     ${hasPermission('users') ? `<div class="ni ${state.page==='users'?'active':''}" data-page="users">${I.users}<span>Users &amp; Roles</span></div>` : ''}
+    ${hasPermission('users') ? `<div class="ni ${state.page==='master'?'active':''}" data-page="master">${I.layers}<span>Master Data</span></div>` : ''}
     ${state.user.role !== 'Client Reviewer' ? `<div class="ni ${state.page==='audit'?'active':''}" data-page="audit">${I.audit}<span>Audit Log</span></div>` : ''}
 
     <div class="sb-foot">
-      <div><span class="status-dot"></span> Synced • Firebase</div>
+      <div>${state.online ? '<span class="status-dot"></span> Synced • Firebase' : '<span class="status-dot" style="background:#ef4444;box-shadow:none"></span> Offline — ยังไม่ได้เชื่อมต่อ'}</div>
       <div style="margin-top:4px;color:#5e7196">v4.3 • asia-southeast1</div>
     </div>
   </aside>`;
@@ -232,7 +257,7 @@ function renderSidebar() {
 
 function renderHeader() {
   const proj = PROJECTS[state.projIdx];
-  const pnames = { dashboard:'Dashboard', issues:'Issues', clashes:'Clashes', report:'Publish Report', analytics:'Analytics', library:'Library', projects:'Projects', users:'Users & Roles', audit:'Audit Log' };
+  const pnames = { dashboard:'Dashboard', issues:'Issues', clashes:'Clashes', report:'Publish Report', analytics:'Analytics', library:'Library', projects:'Projects', users:'Users & Roles', master:'Master Data', audit:'Audit Log' };
   return `<header class="hdr">
     <div class="hdr-btn-wrap">
       <div class="proj-switch" id="proj-switch" onclick="toggleProjMenu(event)">
@@ -248,7 +273,7 @@ function renderHeader() {
         <div class="notif-list">
           ${getVisibleProjects().map(({p, i}) => {
             const count = (PROJECT_ISSUES[i] || []).length;
-            const open = (PROJECT_ISSUES[i] || []).filter(x => x.status !== 'RESOLVED').length;
+            const open = (PROJECT_ISSUES[i] || []).filter(x => !isClosed(x._base !== undefined ? x._base : x.status)).length;
             const isCur = i === state.projIdx;
             return `<div class="notif-item ${isCur?'':'read'}" onclick="switchProject(${i})" style="cursor:pointer">
               <div style="width:34px;height:34px;border-radius:7px;background:${isCur?'var(--green)':'#3A6EA5'};color:#fff;display:grid;place-items:center;font-family:Montserrat;font-weight:700;font-size:11px;flex-shrink:0">${esc(p.code.slice(-2))}</div>
@@ -303,35 +328,34 @@ function renderHeader() {
 function renderDashboard() {
   const all = getIss();
   const t = all.length;
-  const resolved = all.filter(i => i.status==='RESOLVED').length;
-  const active = all.filter(i => i.status==='ACTIVE').length;
-  const newC = all.filter(i => i.status==='NEW').length;
-  const critical = all.filter(i => i.priority==='Critical').length;
-  const open = all.filter(i => i.status !== 'RESOLVED');
-  const avgAge = open.length ? Math.round(open.reduce((s,i)=>s+i.daysOpen,0)/open.length) : 0;
-  const resolvedPct = Math.round(resolved / t * 100);
+  const resolved = all.filter(i => isClosed(i.status)).length;
+  const active = all.filter(i => i.status==='ACTIVE' || i.status==='ACTIVE DELAY').length;
+  const delayed = all.filter(i => i.status==='ACTIVE DELAY').length;
+  const open = all.filter(i => !isClosed(i.status));
+  const avgAge = open.length ? Math.round(open.reduce((s,i)=>s+ageDays(i),0)/open.length) : 0;
+  const resolvedPct = t ? Math.round(resolved / t * 100) : 0;
 
   // Donut data
   const stTally = tally(all, 'status');
-  const stItems = ['RESOLVED','ACTIVE','NEW','Unknown'].map(s => ({label:s, value:stTally[s]||0, color:STATUS_COLOR[s]}));
+  const stItems = statusItems(stTally);
   const prTally = tally(all, 'priority');
-  const prItems = ['Critical','Major','Minor'].map(p => ({label:p, value:prTally[p]||0, color:PRIO_COLOR[p]}));
+  const prItems = priorityItems(prTally);
   const dcTally = tallyDisc(all);
-  const dcItems = Object.entries(dcTally).map(([d,v]) => ({label:d, value:v, color:DISC_COLOR[d]||'#94a3b8'})).sort((a,b)=>b.value-a.value);
+  const dcItems = Object.entries(dcTally).map(([d,v]) => ({label:d, value:v, color:DISC_COLOR[d]||'#94a3b8', onclick:`openDiscZoneChart('${d}')`})).sort((a,b)=>b.value-a.value);
 
   // Recent issues (last 8 by createdAt)
   const recent = [...all].sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt)).slice(0,7);
 
   // Issues waiting on the project owner — surfaced up top since it's usually what a Client Reviewer opens the dashboard for
   const ownerIssues = all.filter(i => discArray(i.disc).includes('OWNER'));
-  const ownerOpen = ownerIssues.filter(i => i.status !== 'RESOLVED').length;
+  const ownerOpen = ownerIssues.filter(i => !isClosed(i.status)).length;
 
   return `<div class="page">
 
     <div class="page-head">
       <div>
-        <h1 class="page-title">Coordination Overview</h1>
-        <div class="page-sub">ภาพรวมประจำวันที่ <strong>29 เมษายน 2026</strong> · ${PROJECTS[state.projIdx].name} · ${PROJECTS[state.projIdx].phase}</div>
+        <h1 class="page-title">Overview</h1>
+        <div class="page-sub">ภาพรวมประจำวันที่ <strong>${new Date().toLocaleDateString('th-TH', { day:'numeric', month:'long', year:'numeric' })}</strong> · ${esc(PROJECTS[state.projIdx].name)} · ${esc(PROJECTS[state.projIdx].phase)}</div>
       </div>
       <div style="display:flex;gap:8px">
         ${hasPermission('import') ? `<button class="btn btn-g" onclick="triggerImportCSV()">${I.upload}<span>Import CSV</span></button>` : ''}
@@ -354,11 +378,11 @@ function renderDashboard() {
 
     <!-- KPI strip -->
     <div class="kpi-grid">
-      ${kpi('Total Issues', t, '+8 wk', 'up', 'k-blue', sparkline([38,42,40,48,52,58,62,71,t], '#3A6EA5'))}
-      ${kpi('Active', active, '−3 wk', 'down', 'k-amber', sparkline([55,52,50,53,48,52,49,50,active],'#ea7f00'))}
-      ${kpi('Resolved %', resolvedPct+'%', '+6 wk', 'down', 'k-green', sparkline([24,28,30,32,34,36,37,38,resolvedPct],'#2DBE60'))}
-      ${kpi('Critical', critical, '+2 wk', 'up', 'k-red', sparkline([12,14,15,17,18,20,21,22,critical],'#dc2626'))}
-      ${kpi('Avg Age', avgAge, '−1 day', 'down', 'k-purple', sparkline([14,15,13,12,12,11,10,11,avgAge],'#9333ea'), 'days')}
+      ${kpi('Total Issues', t, 'k-blue')}
+      ${kpi('Active', active, 'k-amber')}
+      ${kpi('Resolved %', resolvedPct+'%', 'k-green')}
+      ${kpi('Active Delay', delayed, 'k-red')}
+      ${kpi('Avg Age', avgAge, 'k-purple', 'days')}
     </div>
 
     <!-- Charts row -->
@@ -373,29 +397,24 @@ function renderDashboard() {
       </div>
       <div class="card">
         <div class="card-h">
-          <div><h3>By Discipline</h3><div class="ch-sub">สาขางาน · เรียงจากมากไปน้อย</div></div>
+          <div><h3>By Discipline</h3><div class="ch-sub">สาขางาน · คลิกเพื่อดูจำนวนแยกตาม Zone</div></div>
           <a href="javascript:goPage('issues')" style="font-size:12px;color:var(--blue);font-weight:600;text-decoration:none">View all →</a>
         </div>
         <div class="card-b">${barChart(dcItems)}</div>
       </div>
     </div>
 
-    <!-- Burndown -->
+    <!-- Issue Progress -->
     <div class="card" style="margin-bottom:18px">
       <div class="card-h">
-        <div><h3>Burndown — 14 days</h3><div class="ch-sub">เปิดใหม่ · ปิดงาน · backlog รวม</div></div>
-        <div style="display:flex;gap:6px">
-          <button class="btn btn-g btn-sm">14D</button>
-          <button class="btn btn-g btn-sm" style="opacity:.55">30D</button>
-          <button class="btn btn-g btn-sm" style="opacity:.55">90D</button>
-        </div>
+        <div><h3>Issue Progress</h3></div>
       </div>
       <div class="card-b">
-        ${burndownSVG(BURNDOWN)}
+        ${progressSVG(buildProgress(all))}
         <div class="burn-legend">
-          <span><i style="background:#9333ea"></i> Opened</span>
-          <span><i style="background:#2DBE60"></i> Resolved</span>
-          <span><i style="background:#3A6EA5"></i> Open backlog</span>
+          <span><i style="background:#9333ea"></i> Opened — issue ที่เพิ่มเข้ามาในช่วงนั้น</span>
+          <span><i style="background:#2DBE60"></i> Resolved — issue ที่ปิดงานในช่วงนั้น</span>
+          <span><i style="background:#3A6EA5"></i> Open — issue ที่ยังไม่ปิด ณ สิ้นช่วง (สะสม)</span>
         </div>
       </div>
     </div>
@@ -405,7 +424,7 @@ function renderDashboard() {
       <div class="card">
         <div class="card-h">
           <div><h3>Recent Issues</h3><div class="ch-sub">7 รายการล่าสุด</div></div>
-          <a href="javascript:goPage('issues')" style="font-size:12px;color:var(--blue);font-weight:600;text-decoration:none">View all 145 →</a>
+          <a href="javascript:goPage('issues')" style="font-size:12px;color:var(--blue);font-weight:600;text-decoration:none">View all ${t} →</a>
         </div>
         <div style="padding:4px 18px 14px">
           <table class="mini-tbl">
@@ -415,10 +434,10 @@ function renderDashboard() {
                 <td><span class="t-no">#${r.no}</span></td>
                 <td class="t-title">${esc(r.title)}</td>
                 <td>${discBadges(r.disc)}</td>
-                <td class="mono" style="font-size:11.5px">${r.zone}</td>
+                <td class="mono" style="font-size:11.5px">${esc(r.zone)}</td>
                 <td>${priBadge(r.priority)}</td>
                 <td>${stBadge(r.status)}</td>
-                <td style="text-align:right"><span class="muted mono" style="font-size:11px">${r.daysOpen}d</span></td>
+                <td style="text-align:right"><span class="muted mono" style="font-size:11px">${isoToDMY(startISO(r))}</span></td>
               </tr>`).join('')}
             </tbody>
           </table>
@@ -436,38 +455,60 @@ function renderDashboard() {
   </div>`;
 }
 
-function kpi(label, val, trendText, dir, cls, spark, unit) {
-  const trendCls = dir==='up'?'up':dir==='down'?'down':'neutral';
-  const trendIcon = dir==='up' ? I.trendUp : dir==='down' ? I.trendDown : '';
-  // For positive metrics (Resolved %), up trend should be green not red — invert
-  // Actually for Resolved%, "+6 wk" is good, dir='down' was misleading. We already passed dir based on whether it's good (down=green).
+function kpi(label, val, cls, unit) {
   return `<div class="kpi ${cls}">
     <div class="kpi-lbl">${esc(label)}</div>
     <div class="kpi-val">${val}${unit?`<span class="kpi-unit">${unit}</span>`:''}</div>
-    <div class="kpi-row">
-      <span class="kpi-trend ${trendCls}">${trendIcon}${esc(trendText)}</span>
-      <span class="kpi-sub">vs last week</span>
-    </div>
-    <div class="kpi-spark">${spark}</div>
   </div>`;
 }
 
-function sparkline(vals, color) {
-  const w=70, h=24;
-  const min = Math.min(...vals), max = Math.max(...vals);
-  const range = max - min || 1;
-  const step = w / (vals.length - 1);
-  const pts = vals.map((v,i) => `${(i*step).toFixed(1)},${(h - ((v-min)/range)*h).toFixed(1)}`).join(' ');
-  return `<svg width="${w}" height="${h}" style="display:block"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" opacity=".75"/></svg>`;
+/** Click a discipline bar on the Overview → modal: how many of its issues sit in each zone. */
+function openDiscZoneChart(code) {
+  const issues = getIss().filter(it => discArray(it.disc).includes(code));
+  const byZone = {};
+  issues.forEach(it => {
+    const z = it.zone || '—';
+    byZone[z] = byZone[z] || { open: 0, closed: 0 };
+    byZone[z][isClosed(it.status) ? 'closed' : 'open']++;
+  });
+  const rows = Object.entries(byZone)
+    .map(([zone, v]) => ({ zone, open: v.open, closed: v.closed, total: v.open + v.closed }))
+    .sort((a, b) => b.total - a.total);
+  const max = Math.max(...rows.map(r => r.total), 1);
+  openModal(`
+    <div class="modal">
+      <div class="modal-h"><h3>${esc(code)} — จำนวน issue แยกตาม Zone</h3><button class="so-close" onclick="closeModal()">${I.close}</button></div>
+      <div class="modal-b">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:12px">${esc(PROJECTS[state.projIdx].name)} · ทั้งหมด <strong>${issues.length}</strong> issues</div>
+        ${rows.length === 0 ? '<div style="padding:20px;text-align:center;color:var(--muted)">ไม่มี issue</div>' : rows.map(r => `
+          <div style="margin-bottom:11px">
+            <div style="display:flex;justify-content:space-between;gap:10px;font-size:12.5px;margin-bottom:4px">
+              <span class="mono" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.zone)}">${esc(r.zone)}</span>
+              <strong>${r.total}</strong>
+            </div>
+            <div class="zc-track" style="width:100%">
+              <div style="width:${(r.total/max*100).toFixed(1)}%;display:flex;height:100%">
+                <div style="flex:${r.closed};background:#2DBE60" title="ปิดงานแล้ว ${r.closed}"></div>
+                <div style="flex:${r.open};background:${DISC_COLOR[code]||'#3A6EA5'}" title="ยังเปิดอยู่ ${r.open}"></div>
+              </div>
+            </div>
+          </div>`).join('')}
+        <div class="burn-legend" style="margin-top:14px">
+          <span><i style="background:${DISC_COLOR[code]||'#3A6EA5'}"></i> ยังเปิดอยู่</span>
+          <span><i style="background:#2DBE60"></i> ปิดงานแล้ว (Resolved / Approved)</span>
+        </div>
+      </div>
+      <div class="modal-f"><button class="btn btn-g" onclick="closeModal()">Close</button></div>
+    </div>`);
 }
 
 function activityRow(a) {
   let icon = I.edit, cls = 'blue';
   if (a.action === 'Status Change') {
-    if (a.newVal === 'RESOLVED') { icon = I.create; cls = 'green'; }
-    else if (a.newVal === 'ACTIVE') { icon = I.edit; cls = 'blue'; }
+    if (isClosed(a.newVal)) { icon = I.create; cls = 'green'; }
+    else if (a.newVal === 'ACTIVE' || a.newVal === 'ACTIVE DELAY') { icon = I.edit; cls = 'blue'; }
   } else if (a.action === 'Priority Change') {
-    icon = I.trendUp; cls = a.newVal==='Critical' ? 'red' : 'amber';
+    icon = I.trendUp; cls = 'amber';
   } else if (a.action === 'Issue Created') { icon = I.plus; cls = 'purple'; }
   else if (a.action === 'Comment Added') { icon = I.comment; cls = 'blue'; }
   else if (a.action === 'CSV Import') { icon = I.upload; cls = 'amber'; }
@@ -493,14 +534,18 @@ function activityRow(a) {
   </div>`;
 }
 
-// ===== Burndown SVG =====
-function burndownSVG(data) {
+// ===== Issue Progress SVG =====
+function progressSVG(data) {
+  if (!data || data.length < 2) {
+    return '<div style="padding:40px;text-align:center;color:var(--muted);font-size:13px">ยังไม่มีข้อมูล issue ให้แสดงความคืบหน้า</div>';
+  }
   const w = 720, h = 230, padL = 36, padR = 14, padT = 16, padB = 28;
   const innerW = w - padL - padR, innerH = h - padT - padB;
   const maxOpen = Math.max(...data.map(d => d.openTotal), 10);
-  const maxBar  = Math.max(...data.map(d => Math.max(d.opened, d.resolved)), 10);
+  const maxBar  = Math.max(...data.map(d => Math.max(d.opened, d.resolved)), 5);
   const stepX = innerW / (data.length - 1);
-  const barW = Math.max(6, stepX * 0.22);
+  const barW = Math.max(3, Math.min(14, stepX * 0.3));
+  const labelEvery = Math.max(1, Math.ceil(data.length / 12));
 
   // Y axis ticks (5)
   const yTicks = [];
@@ -516,10 +561,10 @@ function burndownSVG(data) {
   data.forEach((d, i) => {
     const x = padL + i * stepX;
     // opened bar (purple)
-    const opH = (d.opened / maxOpen) * innerH * 0.55;
-    bars += `<rect x="${x - barW - 1}" y="${padT + innerH - opH}" width="${barW}" height="${opH}" fill="#9333ea" opacity=".55" rx="2"><title>เปิดใหม่ ${d.opened}</title></rect>`;
-    const resH = (d.resolved / maxOpen) * innerH * 0.55;
-    bars += `<rect x="${x + 1}" y="${padT + innerH - resH}" width="${barW}" height="${resH}" fill="#2DBE60" opacity=".7" rx="2"><title>ปิดงาน ${d.resolved}</title></rect>`;
+    const opH = (d.opened / maxBar) * innerH * 0.45;
+    bars += `<rect x="${x - barW - 1}" y="${padT + innerH - opH}" width="${barW}" height="${opH}" fill="#9333ea" opacity=".55" rx="2"><title>${d.label}: เพิ่มใหม่ ${d.opened}</title></rect>`;
+    const resH = (d.resolved / maxBar) * innerH * 0.45;
+    bars += `<rect x="${x + 1}" y="${padT + innerH - resH}" width="${barW}" height="${resH}" fill="#2DBE60" opacity=".7" rx="2"><title>${d.label}: ปิดงาน ${d.resolved}</title></rect>`;
   });
 
   // Line for open backlog
@@ -536,13 +581,13 @@ function burndownSVG(data) {
   let dots = data.map((d,i) => {
     const x = padL + i * stepX;
     const y = padT + innerH - (d.openTotal / maxOpen) * innerH;
-    return `<circle cx="${x}" cy="${y}" r="${i===data.length-1?5:2.6}" fill="#3A6EA5" stroke="#fff" stroke-width="${i===data.length-1?2:1}"><title>${d.label}: backlog ${d.openTotal}</title></circle>`;
+    return `<circle cx="${x}" cy="${y}" r="${i===data.length-1?5:2.6}" fill="#3A6EA5" stroke="#fff" stroke-width="${i===data.length-1?2:1}"><title>${d.label}: ยังเปิดอยู่ ${d.openTotal}</title></circle>`;
   }).join('');
 
-  // X axis labels (every 2nd)
+  // X axis labels (thinned so they never overlap)
   let xLabels = '';
   data.forEach((d, i) => {
-    if (i % 2 === 0 || i === data.length-1) {
+    if (i % labelEvery === 0 || i === data.length-1) {
       const x = padL + i * stepX;
       xLabels += `<text x="${x}" y="${h - 10}" font-size="9.5" fill="#94a3b8" text-anchor="middle" font-family="JetBrains Mono">${d.label}</text>`;
     }
@@ -585,11 +630,11 @@ function renderIssues() {
     <span style="font-size:12.5px">Set status:</span>
     <select class="bb-btn" onchange="bulkUpdate('status', this.value); this.selectedIndex=0">
       <option value="">— เลือก —</option>
-      <option>NEW</option><option>ACTIVE</option><option>RESOLVED</option><option>Unknown</option>
+      ${statusList().map(s => `<option value="${esc(s)}">${esc(statusLabel(s))}</option>`).join('')}
     </select>
     <select class="bb-btn" onchange="bulkUpdate('priority', this.value); this.selectedIndex=0">
       <option value="">— Priority —</option>
-      <option>Critical</option><option>Major</option><option>Minor</option>
+      ${priorityList().map(p => `<option>${esc(p)}</option>`).join('')}
     </select>
     <button class="bb-btn" onclick="exportSelected()">${I.download} Export selected</button>
     <button class="bb-btn danger" onclick="bulkDelete()">${I.close} Delete</button>
@@ -613,20 +658,16 @@ function renderIssues() {
     <div class="toolbar">
       <div class="fchips">
         <button class="fchip ${f.status==='all'?'active':''}" onclick="setFilter('status','all')">All <span class="fch-n">${getIss().length}</span></button>
-        <button class="fchip ${f.status==='NEW'?'active':''}" onclick="setFilter('status','NEW')">NEW <span class="fch-n">${stTally.NEW||0}</span></button>
-        <button class="fchip ${f.status==='ACTIVE'?'active':''}" onclick="setFilter('status','ACTIVE')">ACTIVE <span class="fch-n">${stTally.ACTIVE||0}</span></button>
-        <button class="fchip ${f.status==='RESOLVED'?'active':''}" onclick="setFilter('status','RESOLVED')">RESOLVED <span class="fch-n">${stTally.RESOLVED||0}</span></button>
+        ${STATUS_CORE.map(s => `<button class="fchip ${f.status===s?'active':''}" onclick="setFilter('status','${s}')">${s} <span class="fch-n">${stTally[s]||0}</span></button>`).join('')}
         ${(() => { const oc = getIss().filter(i => discArray(i.disc).includes('OWNER')).length; return oc > 0 ? `<button class="fchip ${f.disc==='OWNER'?'active':''}" style="background:#4338ca;color:#fff;border-color:#4338ca" onclick="showOwnerBlockedIssues()">Owner-blocked <span class="fch-n" style="background:rgba(255,255,255,.25);color:#fff">${oc}</span></button>` : ''; })()}
       </div>
       <select class="fsel" onchange="setFilter('disc', this.value)">
         <option value="all" ${f.disc==='all'?'selected':''}>All Disciplines</option>
-        ${VALID_DISC_CODES.map(d => `<option ${f.disc===d?'selected':''}>${d}</option>`).join('')}
+        ${discFilterCodes().map(d => `<option ${f.disc===d?'selected':''}>${esc(d)}</option>`).join('')}
       </select>
       <select class="fsel" onchange="setFilter('prio', this.value)">
         <option value="all" ${f.prio==='all'?'selected':''}>All Priority</option>
-        <option ${f.prio==='Critical'?'selected':''}>Critical</option>
-        <option ${f.prio==='Major'?'selected':''}>Major</option>
-        <option ${f.prio==='Minor'?'selected':''}>Minor</option>
+        ${masterOptions(priorityList(), f.prio==='all' ? '' : f.prio)}
       </select>
       <select class="fsel" onchange="setFilter('zone', this.value)">
         <option value="all" ${f.zone==='all'?'selected':''}>All Zones</option>
@@ -648,10 +689,10 @@ function renderIssues() {
         <div>NO.</div>
         <div>Title</div>
         <div>Disc.</div>
-        <div>Zone / Floor</div>
+        <div>Zone</div>
         <div>Priority</div>
         <div>Status</div>
-        <div>Age</div>
+        <div>Start / Due</div>
         <div></div>
       </div>
       ${slice.map(it => issueRow(it)).join('')}
@@ -695,18 +736,21 @@ function issueRow(it) {
     <div><span class="t-no">#${it.no}</span></div>
     <div class="t-title" onclick="openDetail('${it.no}')" title="${esc(it.title)}">${esc(it.title)}</div>
     <div>${discBadges(it.disc)}</div>
-    <div><span class="mono" style="font-size:11.5px">${it.zone.replace('ZONE ','Z')}</span> <span class="muted mono" style="font-size:10.5px">· ${it.floor}</span></div>
+    <div><span class="mono" style="font-size:11.5px" title="${esc(it.zone)}">${esc((it.zone || '—').replace('ZONE ','Z'))}</span></div>
     <div>
-      <select class="ie-sel" style="color:${PRIO_COLOR[it.priority]}" onchange="quickField('${it.no}','priority',this.value)">
-        ${PRIORITIES.map(p => `<option ${p===it.priority?'selected':''}>${p}</option>`).join('')}
+      <select class="ie-sel" style="color:${PRIO_COLOR[it.priority] || '#6b7280'}" onchange="quickField('${it.no}','priority',this.value)">
+        ${masterOptions(priorityList(), it.priority)}
       </select>
     </div>
     <div>
-      <select class="ie-sel" style="color:${STATUS_COLOR[it.status]}" onchange="quickField('${it.no}','status',this.value)">
-        ${STATUSES.map(s => `<option ${s===it.status?'selected':''}>${s}</option>`).join('')}
+      <select class="ie-sel" style="color:${statusColor(it.status)}" onchange="quickField('${it.no}','status',this.value)">
+        ${masterOptions(statusList(), it.status, statusLabel)}
       </select>
     </div>
-    <div><span class="mono" style="font-size:11.5px;color:${it.daysOpen > 14 ? '#dc2626' : 'var(--muted)'}">${it.daysOpen}d</span></div>
+    <div class="mono" style="font-size:11px;line-height:1.5">
+      <div class="muted" title="Start date">${isoToDMY(startISO(it))}</div>
+      <div style="color:${it.status==='ACTIVE DELAY' ? '#e11d48' : 'var(--muted)'}" title="Due date (Freeze model)">${isoToDMY(dueISO(it))}</div>
+    </div>
     <div><button class="t-row-btn" onclick="openDetail('${it.no}')">${I.more}</button></div>
   </div>`;
 }
@@ -715,16 +759,16 @@ function issueRow(it) {
 function renderAnalytics() {
   const all = getIss();
   const stTally = tally(all, 'status');
-  const stItems = ['RESOLVED','ACTIVE','NEW','Unknown'].map(s => ({label:s, value:stTally[s]||0, color:STATUS_COLOR[s]}));
+  const stItems = statusItems(stTally);
   const prTally = tally(all, 'priority');
-  const prItems = ['Critical','Major','Minor'].map(p => ({label:p, value:prTally[p]||0, color:PRIO_COLOR[p]}));
+  const prItems = priorityItems(prTally);
   const dcTally = tallyDisc(all);
   const dcItems = Object.entries(dcTally).map(([d,v]) => ({label:d, value:v, color:DISC_COLOR[d]||'#94a3b8'})).sort((a,b)=>b.value-a.value);
   const znTally = tally(all, 'zone');
   const znItems = Object.entries(znTally).map(([z,v],i) => ({label:z, value:v, color: i===0?'#3A6EA5':'#1F3A5F'}));
 
   const t = all.length;
-  const resolved = stTally.RESOLVED || 0;
+  const resolved = all.filter(i => isClosed(i.status)).length;
   const avgRes = 5.4; // days
   const reopenRate = 4;
 
@@ -876,7 +920,7 @@ function renderProjects() {
 
 function projectCard(p, i) {
   const count = (PROJECT_ISSUES[i] || []).length;
-  const open = (PROJECT_ISSUES[i] || []).filter(x => x.status !== 'RESOLVED').length;
+  const open = (PROJECT_ISSUES[i] || []).filter(x => !isClosed(x._base !== undefined ? x._base : x.status)).length;
   const resolved = count - open;
   const isCur = i === state.projIdx;
   const pct = count > 0 ? Math.round(resolved / count * 100) : 0;
@@ -1025,24 +1069,57 @@ function getReportIssues() {
   return arr;
 }
 
+// How issues are ordered in the printed list — chosen on the Publish Report page before export,
+// independent of the issue number / the order they were added.
+const REPORT_SORTS = [
+  ['priority', 'Priority (ความสำคัญ)'],
+  ['status', 'Status (ตามลำดับสถานะ)'],
+  ['zone', 'Zone (ก-ฮ / A-Z)'],
+  ['discipline', 'Discipline'],
+  ['due', 'Due date'],
+  ['start', 'Start date'],
+  ['no', 'หมายเลข issue']
+];
+function reportSortFn() {
+  const { sortBy, sortDir } = state.reportOpts;
+  const dir = sortDir === 'desc' ? -1 : 1;
+  const idx = (list, v) => { const i = list.indexOf(v); return i < 0 ? 99 : i; };
+  const text = (a, b) => String(a || '').localeCompare(String(b || ''), undefined, { numeric: true });
+  const num = (a, b) => (+a.no) - (+b.no);
+  const cmp = {
+    priority:   (a, b) => idx(priorityList(), a.priority) - idx(priorityList(), b.priority),
+    status:     (a, b) => idx(statusList(), a.status) - idx(statusList(), b.status),
+    zone:       (a, b) => text(a.zone, b.zone),
+    discipline: (a, b) => text(discArray(a.disc)[0], discArray(b.disc)[0]),
+    due:        (a, b) => text(dueISO(a) || '9999', dueISO(b) || '9999'),
+    start:      (a, b) => text(startISO(a), startISO(b)),
+    no:         num
+  }[sortBy] || num;
+  return (a, b) => (cmp(a, b) * dir) || num(a, b);
+}
+function setReportSort(key, val) {
+  state.reportOpts[key] = val;
+  render();
+}
+
 function renderReport() {
   const all = getIss();
   const t = all.length;
   const filtered = getReportIssues();
   const ft = filtered.length;
-  const resolved = filtered.filter(i => i.status==='RESOLVED').length;
-  const critical = filtered.filter(i => i.priority==='Critical').length;
-  const openIssues = filtered.filter(i => i.status !== 'RESOLVED');
-  const avgAge = openIssues.length ? Math.round(openIssues.reduce((s,i)=>s+i.daysOpen,0)/openIssues.length) : 0;
+  const resolved = filtered.filter(i => isClosed(i.status)).length;
+  const delayed = filtered.filter(i => i.status==='ACTIVE DELAY').length;
+  const openIssues = filtered.filter(i => !isClosed(i.status));
+  const avgAge = openIssues.length ? Math.round(openIssues.reduce((s,i)=>s+ageDays(i),0)/openIssues.length) : 0;
   const proj = PROJECTS[state.projIdx];
   const opts = state.reportOpts;
   const showSection = (k) => opts.sections.includes(k);
 
   // Tallies for charts (limited to filtered set)
   const stTally = tally(filtered, 'status');
-  const stItems = ['RESOLVED','ACTIVE','NEW','Unknown'].map(s => ({label:s, value:stTally[s]||0, color:STATUS_COLOR[s]}));
+  const stItems = statusItems(stTally);
   const prTally = tally(filtered, 'priority');
-  const prItems = ['Critical','Major','Minor'].map(p => ({label:p, value:prTally[p]||0, color:PRIO_COLOR[p]}));
+  const prItems = priorityItems(prTally);
   const dcTally = tallyDisc(filtered);
   const dcItems = Object.entries(dcTally).map(([d,v]) => ({label:d, value:v, color:DISC_COLOR[d]||'#94a3b8'})).sort((a,b)=>b.value-a.value);
 
@@ -1064,7 +1141,7 @@ function renderReport() {
           <span class="badge b-active">LIVE PREVIEW</span>
         </div>
         <div style="padding:18px;background:#eef2f8;max-height:780px;overflow-y:auto" id="report-preview-host">
-          ${renderReportContent({proj, filtered, all, opts, showSection, stItems, prItems, dcItems, avgAge, resolved, critical, ft, t})}
+          ${renderReportContent({proj, filtered, all, opts, showSection, stItems, prItems, dcItems, avgAge, resolved, delayed, ft, t})}
         </div>
       </div>
       <div>
@@ -1091,12 +1168,24 @@ function renderReport() {
                 ['exec','Executive Summary'],
                 ['charts','Charts (Priority, Status, Discipline)'],
                 ['cards','Issue Cards with Viewpoints'],
-                ['comments','Comment History'],
-                ['audit','Audit Trail']
-              ].filter(([k]) => k !== 'audit' || state.user.role !== 'Client Reviewer').map(([k,s]) => `
+                ['comments','Comment History']
+              ].map(([k,s]) => `
                 <label style="display:flex;align-items:center;gap:9px;padding:5px 0;font-size:13px;cursor:pointer" onclick="toggleReportSection('${k}')">
                   <span class="ck ${opts.sections.includes(k)?'checked':''}"></span>${s}
                 </label>`).join('')}
+            </div>
+            <div>
+              <div style="font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px">เรียงลำดับ Issue ในรายงาน</div>
+              <div style="display:flex;gap:6px">
+                <select class="fsel" style="flex:1" onchange="setReportSort('sortBy', this.value)">
+                  ${REPORT_SORTS.map(([k, l]) => `<option value="${k}" ${opts.sortBy===k?'selected':''}>${l}</option>`).join('')}
+                </select>
+                <select class="fsel" style="width:112px" onchange="setReportSort('sortDir', this.value)">
+                  <option value="asc" ${opts.sortDir!=='desc'?'selected':''}>A → Z</option>
+                  <option value="desc" ${opts.sortDir==='desc'?'selected':''}>Z → A</option>
+                </select>
+              </div>
+              <div style="font-size:11px;color:var(--muted);margin-top:5px">Status เรียงตามลำดับสถานะ (NEW ขึ้นก่อน ตามด้วย ACTIVE …) · ไม่ขึ้นกับลำดับที่เพิ่ม issue</div>
             </div>
             <div>
               <div style="font-size:11.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;font-weight:700;margin-bottom:6px">Status</div>
@@ -1133,7 +1222,7 @@ function renderReport() {
 // ====== Report content renderer ======
 // Used by both inline preview and the PDF/print window
 function renderReportContent(ctx) {
-  const { proj, filtered, all, opts, showSection, stItems, prItems, dcItems, avgAge, resolved, critical, ft, t } = ctx;
+  const { proj, filtered, all, opts, showSection, stItems, prItems, dcItems, avgAge, resolved, delayed, ft, t } = ctx;
   const pageStyle = `background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.08);border-radius:4px;margin-bottom:14px;overflow:hidden`;
   const today = new Date().toLocaleDateString('en-GB', { day:'2-digit', month:'short', year:'numeric' });
   let html = '';
@@ -1182,8 +1271,8 @@ function renderReportContent(ctx) {
         <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:18px">
           ${[
             ['Total Issues', ft, '#1a2540'],
-            ['Resolved', resolved, '#2DBE60'],
-            ['Critical', critical, '#dc2626'],
+            ['Resolved / Approved', resolved, '#2DBE60'],
+            ['Active Delay', delayed, '#e11d48'],
             ['Avg Age (open)', avgAge+'d', '#1a2540']
           ].map(([l,v,c]) => `<div>
             <div style="font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:.5px;font-weight:600">${l}</div>
@@ -1192,7 +1281,7 @@ function renderReportContent(ctx) {
         </div>
         <div style="margin-top:18px;padding:12px 14px;background:#f7faff;border-radius:6px;font-size:12.5px;line-height:1.55;color:#334155">
           <strong>สรุป:</strong> โครงการ ${esc(proj.name)} ระยะ ${esc(proj.phase)} มี coordination issues ทั้งหมด ${ft} รายการ
-          (เปิด ${ft - resolved} · ปิด ${resolved}) · Critical ${critical} รายการ · เฉลี่ยอายุของ issue ที่ยังเปิด ${avgAge} วัน
+          (เปิด ${ft - resolved} · ปิด ${resolved}) · เกินกำหนด (Active Delay) ${delayed} รายการ · เฉลี่ยอายุของ issue ที่ยังเปิด ${avgAge} วัน
           ${opts.disciplines.length ? ` · กรองเฉพาะสาขา ${opts.disciplines.join(', ')}` : ''}
           ${opts.statuses && opts.statuses.length ? ` · status: ${opts.statuses.join(', ')}` : ''}.
         </div>
@@ -1231,39 +1320,11 @@ function renderReportContent(ctx) {
       <div style="padding:20px 26px">
         <div style="font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:.6px;font-weight:700;margin-bottom:14px;display:flex;justify-content:space-between">
           <span>Issue List (${ft})</span>
-          <span style="color:#94a3b8">เรียงตามความเร่งด่วน · NO.</span>
+          <span style="color:#94a3b8">เรียงตาม ${esc((REPORT_SORTS.find(s => s[0] === opts.sortBy) || REPORT_SORTS[0])[1])} · ${opts.sortDir === 'desc' ? 'Z → A' : 'A → Z'}</span>
         </div>
         ${filtered.length === 0
           ? '<div style="padding:30px;text-align:center;color:#94a3b8;font-size:13px">ไม่พบ issue ที่ตรงกับ filter</div>'
-          : filtered.slice().sort(prioritySort).map(it => reportIssueCard(it, showSection('comments'))).join('')}
-      </div>
-    </div>`;
-  }
-
-  // --- Audit Trail (internal-ops only — never shown to a Client Reviewer) ---
-  if (showSection('audit') && state.user.role !== 'Client Reviewer') {
-    const aud = getAud();
-    html += `<div class="rpt-page rpt-audit" style="${pageStyle}">
-      <div style="padding:20px 26px">
-        <div style="font-size:10.5px;color:#64748b;text-transform:uppercase;letter-spacing:.6px;font-weight:700;margin-bottom:14px">Audit Trail (${aud.length} entries)</div>
-        <table style="width:100%;border-collapse:collapse;font-size:11px">
-          <thead><tr style="background:#f1f5f9;color:#475569;text-transform:uppercase;letter-spacing:.4px">
-            <th style="text-align:left;padding:7px 10px;font-weight:700">Time</th>
-            <th style="text-align:left;padding:7px 10px;font-weight:700">No.</th>
-            <th style="text-align:left;padding:7px 10px;font-weight:700">Action</th>
-            <th style="text-align:left;padding:7px 10px;font-weight:700">Change</th>
-            <th style="text-align:left;padding:7px 10px;font-weight:700">User</th>
-          </tr></thead>
-          <tbody>
-            ${aud.slice(0,30).map(a => `<tr style="border-bottom:1px solid #e2e8f0">
-              <td style="padding:6px 10px;font-family:JetBrains Mono;color:#64748b">${esc(a.ts)}</td>
-              <td style="padding:6px 10px;font-family:JetBrains Mono;color:#3A6EA5;font-weight:600">${a.issueNo?`#${a.issueNo}`:'—'}</td>
-              <td style="padding:6px 10px;color:#1a2540">${esc(a.action)}</td>
-              <td style="padding:6px 10px;font-family:JetBrains Mono;color:#64748b">${esc(a.oldVal||'∅')} → ${esc(a.newVal||'∅')}</td>
-              <td style="padding:6px 10px;color:#1a2540">${esc(a.user)}</td>
-            </tr>`).join('')}
-          </tbody>
-        </table>
+          : filtered.slice().sort(reportSortFn()).map(it => reportIssueCard(it, showSection('comments'))).join('')}
       </div>
     </div>`;
   }
@@ -1274,21 +1335,14 @@ function renderReportContent(ctx) {
   return html;
 }
 
-function prioritySort(a, b) {
-  const order = { 'Critical': 0, 'Major': 1, 'Minor': 2 };
-  const oa = order[a.priority] ?? 3, ob = order[b.priority] ?? 3;
-  if (oa !== ob) return oa - ob;
-  return (+a.no) - (+b.no);
-}
-
 function reportIssueCard(it, showComment) {
   const img = getImg(it.no);
   const isClient = state.user.role === 'Client Reviewer';
   const imgBox = img
     ? `<div style="width:130px;aspect-ratio:4/3;border-radius:4px;overflow:hidden;background:#e7ecf3;flex-shrink:0"><img src="${img}" style="width:100%;height:100%;object-fit:cover;display:block" /></div>`
     : `<div style="width:130px;aspect-ratio:4/3;background:linear-gradient(135deg,#1e293b,#334155);border-radius:4px;display:grid;place-items:center;color:#64748b;font-size:9px;font-weight:600;letter-spacing:.5px;flex-shrink:0">VIEWPOINT<br/>#${it.no}</div>`;
-  const priCol = it.priority==='Critical'?'#dc2626':it.priority==='Major'?'#ea7f00':'#6b7280';
-  const stCol = STATUS_COLOR[it.status] || '#94a3b8';
+  const priCol = PRIO_COLOR[it.priority] || '#6b7280';
+  const stCol = statusColor(it.status);
   return `<div class="issue-card" style="border:1px solid #e2e8f0;border-radius:6px;margin-bottom:10px;overflow:hidden">
     <div style="background:#1F3A5F;color:#fff;padding:8px 14px;font-size:12px;font-weight:600;display:flex;align-items:center;gap:10px">
       <span style="background:rgba(255,255,255,.18);padding:2px 7px;border-radius:4px;font-family:JetBrains Mono">#${it.no}</span>
@@ -1300,13 +1354,13 @@ function reportIssueCard(it, showComment) {
       ${imgBox}
       <div style="font-size:11.5px;line-height:1.65">
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 14px">
-          <div><strong>Discipline:</strong> ${esc(it.disc)}</div>
+          <div><strong>Discipline:</strong> ${esc(discArray(it.disc).join(', '))}</div>
           <div><strong>Zone:</strong> ${esc(it.zone)}</div>
-          <div><strong>Grid:</strong> ${esc(it.grid)}</div>
-          <div><strong>Floor:</strong> ${esc(it.floor)}</div>
-          ${isClient ? '' : `<div><strong>Author:</strong> ${esc(it.author)}</div>`}
+          <div><strong>สาเหตุ:</strong> ${esc(it.cause || '—')}</div>
           ${isClient ? '' : `<div><strong>Assignee:</strong> ${esc(it.assignee)}</div>`}
-          <div><strong>Age:</strong> ${it.daysOpen} days</div>
+          ${isClient ? '' : `<div><strong>Author:</strong> ${esc(it.author)}</div>`}
+          <div><strong>Start date:</strong> ${isoToDMY(startISO(it))}</div>
+          <div><strong>Due date:</strong> ${isoToDMY(dueISO(it))}</div>
         </div>
         ${showComment ? `<div style="margin-top:8px;padding:7px 10px;background:#f1f5f9;border-radius:4px;color:#334155"><strong>Comment:</strong> ${esc(it.comment)}</div>` : ''}
       </div>
@@ -1347,6 +1401,8 @@ function renderLibrary() {
       ${canManage ? `<button class="btn btn-p" onclick="openUploadLibraryDoc()">${I.plus}<span>Upload Document</span></button>` : ''}
     </div>
 
+    ${renderLibrarySearch()}
+
     <div class="toolbar">
       <div class="fchips">
         <button class="fchip ${f.category==='all'?'active':''}" onclick="setLibraryFilter('category','all')">All <span class="fch-n">${LIBRARY_DOCS.length}</span></button>
@@ -1379,6 +1435,7 @@ function libraryDocCard(d, canManage) {
       </div>
     </div>
     ${(d.tags && d.tags.length) ? `<div style="padding:0 16px;display:flex;flex-wrap:wrap;gap:4px">${d.tags.map(t=>`<span style="font-size:10px;color:var(--muted);background:var(--bg);border-radius:3px;padding:2px 6px">#${esc(t)}</span>`).join('')}</div>` : ''}
+    ${libraryIndexBadge(d, canManage)}
     <div style="padding:11px 16px;margin-top:10px;background:var(--bg);border-top:1px solid var(--border-2);display:flex;align-items:center;justify-content:space-between;gap:8px">
       <div style="font-size:10.5px;color:var(--muted);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(d.uploadedBy)} · ${formatDate(d.uploadedAt)}</div>
       <div style="display:flex;gap:6px;flex-shrink:0">
@@ -1443,6 +1500,8 @@ async function saveLibraryDoc() {
     closeModal();
     toast(`✓ อัปโหลด "${title}" แล้ว`, '#2DBE60');
     render();
+    // PDFs are indexed right away (the file is already in hand) so they're searchable by content.
+    if (/\.pdf$/i.test(file.name)) { await indexLibraryDoc(doc, file); render(); }
   } catch (e) {
     console.warn('Library upload:', e);
     toast(`❌ อัปโหลดไม่สำเร็จ — ${e.message || e}`, '#dc2626');
@@ -1457,55 +1516,19 @@ function deleteLibraryDoc(id) {
   const idx = LIBRARY_DOCS.findIndex(d => d.id === id);
   if (idx >= 0) LIBRARY_DOCS.splice(idx, 1);
   fbDeleteLibraryFile(doc.fileUrl);
-  fbSaveLibraryDocs(LIBRARY_DOCS).catch(e => console.warn('Firebase library_docs:', e));
+  if (doc.indexed) { delete _libIndexCache[doc.id]; fbDeleteLibraryIndex(doc.id).catch(() => {}); }
+  fbSaveLibraryDocs(LIBRARY_DOCS).catch(saveFail('Library'));
   toast(`🗑 ลบ "${doc.title}"`, '#dc2626');
   render();
 }
 
 function renderClashes() {
   return `<div class="page">
-    <div class="page-head"><div><h1 class="page-title">Clash Matrix</h1><div class="page-sub">Pairwise clash count ระหว่าง discipline (placeholder)</div></div></div>
+    <div class="page-head"><div><h1 class="page-title">Clash Matrix</h1><div class="page-sub">เกณฑ์ชนิดของ Clash และค่า tolerance ระหว่างองค์ประกอบของแต่ละสาขา</div></div></div>
     <div class="card">
-      <div class="card-b">${clashMatrix()}</div>
+      <div class="card-b">${renderClashRules()}</div>
     </div>
   </div>`;
-}
-
-function clashMatrix() {
-  const discs = ['AC','EE','AR','SN','FP','ST','LA','IN','CM','MG','MEP','PMC','FACADE','CHK','SW'];
-  // synthetic counts based on cross-disc occurrences
-  const grid = {};
-  getIss().forEach(it => {
-    const arr = discArray(it.disc);
-    for (let i=0;i<arr.length;i++) for (let j=0;j<arr.length;j++) {
-      if (i!==j) {
-        const k = arr[i]+'|'+arr[j];
-        grid[k] = (grid[k]||0) + 1;
-      }
-    }
-  });
-  // Also add primary x extra
-  let max = 1;
-  Object.values(grid).forEach(v => { if (v>max) max=v; });
-  // Render
-  const cells = [];
-  cells.push(`<div class="heat-corner"></div>`);
-  discs.forEach(d => cells.push(`<div class="heat-axis" style="color:${DISC_COLOR[d]}">${d}</div>`));
-  discs.forEach(d1 => {
-    cells.push(`<div class="heat-axis" style="color:${DISC_COLOR[d1]};text-align:left;padding-left:6px;justify-content:flex-start">${d1}</div>`);
-    discs.forEach(d2 => {
-      if (d1===d2) { cells.push(`<div class="heat-cell" style="background:#1F3A5F;color:#fff">—</div>`); return; }
-      const v = grid[d1+'|'+d2] || 0;
-      const ratio = v/max;
-      let bg,fg='#1a2540';
-      if (v===0) { bg='#f7faff'; fg='#c5cfdf'; }
-      else if (ratio<0.3) bg='#e8f4ed';
-      else if (ratio<0.6) bg='#f7e3b8';
-      else { bg='#dc6c52'; fg='#fff'; }
-      cells.push(`<div class="heat-cell" style="background:${bg};color:${fg}">${v||'·'}</div>`);
-    });
-  });
-  return `<div class="heat-grid" style="grid-template-columns:80px repeat(${discs.length}, 1fr)">${cells.join('')}</div>`;
 }
 
 // ===== Detail slide-over =====
@@ -1526,7 +1549,7 @@ function openDetail(no) {
          ${canEdit ? `<label class="so-img-upload">${I.image}<span>Replace</span><input type="file" accept="image/*" class="hide" onchange="uploadImage(event,'${no}')"/></label>` : ''}
        </div>`
     : `<div class="so-img"${canEdit ? ` ondragover="event.preventDefault();this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="dropImage(event,'${no}')"` : ''}>
-         <div class="so-img-txt"><strong>Viewpoint #${it.no}</strong>BIM Model · ${it.grid} · ${it.floor}<br/><span style="opacity:.65;font-size:10px;text-transform:none;letter-spacing:0">${canEdit ? 'ลากรูปมาวาง หรือกดปุ่ม Upload' : 'ยังไม่มีรูป'}</span></div>
+         <div class="so-img-txt"><strong>Viewpoint #${it.no}</strong>BIM Model · ${esc(it.zone || '')}<br/><span style="opacity:.65;font-size:10px;text-transform:none;letter-spacing:0">${canEdit ? 'ลากรูปมาวาง หรือกดปุ่ม Upload' : 'ยังไม่มีรูป'}</span></div>
          ${canEdit ? `<label class="so-img-upload">${I.upload}<span>Upload Image</span><input type="file" accept="image/*" class="hide" onchange="uploadImage(event,'${no}')"/></label>` : ''}
        </div>`;
 
@@ -1542,9 +1565,10 @@ function openDetail(no) {
         <div class="meta-row"><div class="meta-lbl">Status</div><div class="meta-val">${stBadge(it.status)}</div></div>
         <div class="meta-row"><div class="meta-lbl">Priority</div><div class="meta-val">${priBadge(it.priority)}</div></div>
         <div class="meta-row"><div class="meta-lbl">Discipline</div><div class="meta-val">${discBadges(it.disc)}</div></div>
-        <div class="meta-row"><div class="meta-lbl">Zone</div><div class="meta-val mono">${it.zone}</div></div>
-        <div class="meta-row"><div class="meta-lbl">Grid / Floor</div><div class="meta-val mono">${it.grid} / ${it.floor}</div></div>
-        <div class="meta-row"><div class="meta-lbl">Age</div><div class="meta-val mono" style="color:${it.daysOpen>14?'#dc2626':'inherit'}">${it.daysOpen} days</div></div>
+        <div class="meta-row"><div class="meta-lbl">Zone</div><div class="meta-val mono">${esc(it.zone)}</div></div>
+        <div class="meta-row"><div class="meta-lbl">สาเหตุ</div><div class="meta-val">${esc(it.cause || '—')}</div></div>
+        <div class="meta-row"><div class="meta-lbl">Start date</div><div class="meta-val mono">${isoToDMY(startISO(it))}</div></div>
+        <div class="meta-row"><div class="meta-lbl">Due date</div><div class="meta-val mono" style="color:${it.status==='ACTIVE DELAY'?'#e11d48':'inherit'}">${isoToDMY(dueISO(it))}${it.status==='ACTIVE DELAY'?' · เกินกำหนด':''}</div></div>
         <div class="meta-row"><div class="meta-lbl">Author</div><div class="meta-val">${esc(it.author)}</div></div>
         <div class="meta-row"><div class="meta-lbl">Assignee</div><div class="meta-val">${esc(it.assignee)}</div></div>
       </div>
@@ -1572,7 +1596,7 @@ function openDetail(no) {
 
       <div style="display:flex;gap:8px;margin-top:18px;flex-wrap:wrap">
         ${canEdit ? `<button class="btn btn-p" style="flex:1" onclick="openEditIssue('${it.no}')">${I.edit}<span>Edit</span></button>` : ''}
-        ${canEdit ? `<button class="btn btn-g" style="flex:1" onclick="markResolved('${it.no}')">${I.check2}<span>${it.status==='RESOLVED'?'Reopen':'Mark Resolved'}</span></button>` : ''}
+        ${canEdit ? `<button class="btn btn-g" style="flex:1" onclick="markResolved('${it.no}')">${I.check2}<span>${isClosed(it._base !== undefined ? it._base : it.status)?'Reopen':'Mark Resolved'}</span></button>` : ''}
         ${canDelete ? `<button class="btn btn-d" onclick="confirmDeleteIssue('${it.no}')" title="Delete">${I.trash}</button>` : ''}
         ${!canEdit && !canDelete && !canComment ? `<div style="flex:1;text-align:center;color:var(--muted);font-size:12px;padding:10px">🔒 ดูอย่างเดียว — role ${state.user.role}</div>` : ''}
       </div>
@@ -1597,12 +1621,14 @@ function aiSuggestion(it) {
     FP: 'แนะนำให้ <em>route pipe หลบ structural beam</em> หรือเพิ่ม sleeve — coordinate กับ ST team',
     ST: 'แนะนำให้ <em>เพิ่ม opening ใน shop drawing</em> หรือลด beam depth — ต้องผ่าน structural engineer',
     LA: 'แนะนำให้ <em>ปรับ planter หลบ MEP underground</em> — ตรวจสอบ root barrier',
-    IN: 'แนะนำให้ <em>ขยับ built-in 50mm</em> หรือปรับ design ให้หลบ conduit'
+    IN: 'แนะนำให้ <em>ขยับ built-in 50mm</em> หรือปรับ design ให้หลบ conduit',
+    MEP: 'แนะนำให้ <em>ประสานแนวท่อ/ราง/duct กับโครงสร้างและสถาปัตย์</em> — ตรวจ clearance ตามตาราง Clash Matrix ก่อนปรับแบบ',
+    FA: 'แนะนำให้ <em>ตรวจ detail ผนังภายนอกและจุดยึด</em> ร่วมกับ ST และ MEP ก่อนออก shop drawing'
   };
   const d = it.discPrimary;
-  let baseline = map[d] || 'ไม่มีคำแนะนำสำหรับ discipline นี้';
-  if (it.priority === 'Critical' && it.daysOpen > 7) {
-    baseline += ' · <em style="color:#fca5a5">Escalate</em>: เปิดเกิน 7 วันและเป็น Critical — แนะนำให้นัดประชุมด่วน';
+  let baseline = map[d] || map[discArray(it.disc)[0]] || 'ไม่มีคำแนะนำสำหรับ discipline นี้';
+  if (it.status === 'ACTIVE DELAY') {
+    baseline += ' · <em style="color:#fca5a5">Escalate</em>: เกิน Due date (Freeze model) แล้ว — แนะนำให้นัดประชุมด่วน';
   }
   return baseline;
 }
@@ -1627,7 +1653,7 @@ function submitComment(no) {
     user: state.user.name
   };
   getAud().unshift(entry);
-  fbAddAudit(state.projIdx, entry).catch(() => {});
+  fbAddAudit(state.projIdx, entry).catch(saveFail('ความเห็น'));
   toast('✓ ส่งความเห็นแล้ว', '#2DBE60');
   openDetail(no); // re-render the slide-over so the new entry shows in Activity
 }
@@ -1635,7 +1661,7 @@ function submitComment(no) {
 // ===== Actions =====
 function goPage(p) {
   // Block direct navigation to admin-only pages
-  if (p === 'users' && !hasPermission('users')) {
+  if ((p === 'users' || p === 'master') && !hasPermission('users')) {
     toast(`🚫 หน้านี้สำหรับ Admin เท่านั้น (role: ${state.user.role})`, '#dc2626');
     return;
   }
@@ -1708,8 +1734,8 @@ function quickField(no, field, val) {
   const it = getIss().find(i => i.no === no);
   if (!it) return;
   const old = it[field];
-  it[field] = val;
-  fbSaveIssue(state.projIdx, it).catch(e => console.warn('Firestore:', e));
+  if (field === 'status') setIssueStatus(it, val); else it[field] = val;
+  fbSaveIssue(state.projIdx, it).catch(saveFail('issue #' + no));
   toast(`✓ #${no}: ${field} ${old} → ${val}`, '#2DBE60');
   // re-render to update colors but keep scroll
   const y = window.scrollY;
@@ -1722,8 +1748,8 @@ function bulkUpdate(field, val) {
   state.selected.forEach(no => {
     const it = getIss().find(i => i.no === no);
     if (it) {
-      it[field] = val;
-      fbSaveIssue(state.projIdx, it).catch(e => console.warn('Firestore:', e));
+      if (field === 'status') setIssueStatus(it, val); else it[field] = val;
+      fbSaveIssue(state.projIdx, it).catch(saveFail('issue'));
     }
   });
   toast(`✓ Updated ${state.selected.size} issues — ${field}: ${val}`, '#2DBE60');
@@ -1737,7 +1763,7 @@ function bulkDelete() {
     const idx = getIss().findIndex(i => i.no === no);
     if (idx >= 0) {
       getIss().splice(idx, 1);
-      fbDeleteIssue(state.projIdx, no).catch(e => console.warn('Firestore:', e));
+      fbDeleteIssue(state.projIdx, no).catch(saveFail('การลบ issue'));
       fbDeleteImage(state.projIdx, no).catch(e => console.warn('Storage:', e));
     }
   });
@@ -1762,7 +1788,9 @@ function renderCmdList(q) {
     { type:'page', name:'Analytics', id:'analytics' },
     { type:'page', name:'Publish Report', id:'report' },
     { type:'page', name:'Projects', id:'projects' },
+    { type:'page', name:'Clashes', id:'clashes' },
     { type:'page', name:'Users & Roles', id:'users' },
+    ...(hasPermission('users') ? [{ type:'page', name:'Master Data', id:'master' }] : []),
     { type:'page', name:'Audit Log', id:'audit' }
   ];
   const matchedPages = q ? pages.filter(p => p.name.toLowerCase().includes(q)) : pages;
@@ -1774,7 +1802,7 @@ function renderCmdList(q) {
   }
   if (matchedIssues.length) {
     html += '<div class="cmdk-sec">Issues</div>';
-    html += matchedIssues.map(i => `<div class="cmdk-item" data-type="issue" data-id="${i.no}"><span class="ci-no">#${i.no}</span><span class="ci-name">${esc(i.title)}</span><span class="ci-tag">${i.discPrimary}</span></div>`).join('');
+    html += matchedIssues.map(i => `<div class="cmdk-item" data-type="issue" data-id="${i.no}"><span class="ci-no">#${i.no}</span><span class="ci-name">${esc(i.title)}</span><span class="ci-tag">${esc(mainDisc(i.discPrimary))}</span></div>`).join('');
   }
   if (!html) html = '<div style="padding:30px;text-align:center;color:var(--muted);font-size:13px">ไม่พบผลลัพธ์</div>';
   $('#cmdk-list').innerHTML = html;
@@ -1792,6 +1820,7 @@ function render() {
         state.page==='report' ? renderReport() :
         state.page==='projects' ? renderProjects() :
         state.page==='users' ? renderUsers() :
+        state.page==='master' ? renderMaster() :
         state.page==='audit' ? renderAudit() :
         state.page==='library' ? renderLibrary() :
         state.page==='clashes' ? renderClashes() : ''}
@@ -1937,6 +1966,8 @@ async function handleAuthStateChange(firebaseUser) {
   } catch (e) {
     console.warn('Cloud sync (projects/users):', e);
   }
+  // Master data has its own node/rule; if it can't be read yet the built-in defaults stay in use.
+  try { applyMasterFromCloud(await fbLoadMaster()); } catch (e) { console.warn('master_data:', e); }
 
   // ─── Resolve role: lookup USERS by email, auto-add if new ──────────
   const displayName = firebaseUser.displayName || firebaseUser.email.split('@')[0];
@@ -1994,12 +2025,24 @@ async function handleAuthStateChange(firebaseUser) {
     PROJECTS.length = 0;
     projects.forEach(p => PROJECTS.push(p));
     if (state.projIdx >= PROJECTS.length) state.projIdx = 0;
+    reapplyAutoDelay();   // zone freeze dates may have changed
+    render();
+  });
+  fbSubscribeMaster((data) => {
+    applyMasterFromCloud(data);
+    if (['master','issues','dashboard','report'].includes(state.page)) render();
+  });
+  fbWatchConnection((online) => {
+    if (state.online === online) return;
+    state.online = online;
+    toast(online ? '✓ เชื่อมต่อ Firebase แล้ว' : '⚠️ หลุดการเชื่อมต่อ — การแก้ไขจะยังไม่ถูกบันทึกจนกว่าจะเชื่อมต่อใหม่', online ? '#2DBE60' : '#d97706', online ? 2200 : 5000);
     render();
   });
   fbSubscribeUsers((users) => {
     if (users.length === 0) return;
     USERS.length = 0;
     users.forEach(u => USERS.push(u));
+    reconcileAccessIfEnabled();
     // Re-sync current user's role if it was changed by an admin
     if (state.user && state.user.email) {
       const me = USERS.find(u => (u.email || '').toLowerCase() === state.user.email.toLowerCase());
@@ -2038,10 +2081,13 @@ async function loadProjectData(projIdx) {
   try {
     const issues = await fbLoadIssues(projIdx);
     if (issues === null) {
-      // First time — seed RTDB from mock data
-      toast('🌱 กำลัง setup project ครั้งแรก…', '#3A6EA5');
-      await fbSeedIssues(projIdx, PROJECT_ISSUES[projIdx] || []);
-      toast(`✓ Project ready · ${(PROJECT_ISSUES[projIdx] || []).length} issues`, '#2DBE60');
+      // First time — seed RTDB from mock data (only someone who may create issues; everyone else just sees an empty project)
+      if (!PROJECT_ISSUES[projIdx]) PROJECT_ISSUES[projIdx] = [];
+      if (hasPermission('create')) {
+        toast('🌱 กำลัง setup project ครั้งแรก…', '#3A6EA5');
+        await fbSeedIssues(projIdx, PROJECT_ISSUES[projIdx]);
+        toast(`✓ Project ready · ${PROJECT_ISSUES[projIdx].length} issues`, '#2DBE60');
+      }
     } else {
       // Auto-fix disciplines on load (repairs PT0001 data from old CSV import bug)
       let fixedCount = 0;
@@ -2051,8 +2097,9 @@ async function loadProjectData(projIdx) {
           state.imgStore[`p${projIdx}_${it.no}`] = it.imageUrl;
         }
       });
+      prepareIssues(issues, projIdx);
       PROJECT_ISSUES[projIdx] = issues;
-      if (fixedCount > 0) {
+      if (fixedCount > 0 && hasPermission('edit')) {
         toast(`🔧 ซ่อม disciplines ${fixedCount} issues — กำลังบันทึก…`, '#3A6EA5');
         fbSeedIssues(projIdx, issues).then(() => {
           toast(`✓ Synced · ${issues.length} issues (fixed ${fixedCount})`, '#2DBE60');
@@ -2075,6 +2122,7 @@ async function loadProjectData(projIdx) {
         state.imgStore[`p${projIdx}_${it.no}`] = it.imageUrl;
       }
     });
+    prepareIssues(issues, projIdx);
     PROJECT_ISSUES[projIdx] = issues;
     render();
   });
@@ -2194,7 +2242,7 @@ async function _handleImageFile(file, no) {
     fbUploadDataUrl(state.projIdx, no, data).then(url => {
       setImg(no, url);
       const it = getIss().find(i => i.no === no);
-      if (it) { it.imageUrl = url; fbSaveIssue(state.projIdx, it).catch(() => {}); }
+      if (it) { it.imageUrl = url; fbSaveIssue(state.projIdx, it).catch(saveFail('รูป issue')); }
     }).catch(e => console.warn('Storage upload:', e));
   } catch (e) {
     toast('❌ อัปโหลดรูปไม่สำเร็จ', '#dc2626');
@@ -2286,24 +2334,8 @@ function closeModal() {
 
 // ============== Multi-select for disciplines ==============
 function renderDiscMultiSelect() {
-  const DISC_LIST = [
-    { key:'AR', label:'AR — Architecture' },
-    { key:'ST', label:'ST — Structure' },
-    { key:'AC', label:'AC — Air Conditioning' },
-    { key:'EE', label:'EE — Electrical' },
-    { key:'SN', label:'SN — Sanitary' },
-    { key:'FP', label:'FP — Fire Protection' },
-    { key:'LA', label:'LA — Landscape' },
-    { key:'IN', label:'IN — Interior' },
-    { key:'CM', label:'CM — Construction Management' },
-    { key:'MG', label:'MG — Management' },
-    { key:'MEP', label:'MEP — Mechanical/Electrical/Plumbing (รวมสาขา)' },
-    { key:'PMC', label:'PMC — Project Management Consultant' },
-    { key:'FACADE', label:'FACADE — งานผนังภายนอกอาคาร' },
-    { key:'CHK', label:'CHK — Check/QC' },
-    { key:'SW', label:'SW — Shop Drawing' },
-    { key:'OWNER', label:'OWNER — รอการตัดสินใจจากเจ้าของโครงการ' }
-  ];
+  const DISC_NAMES = { AR:'Architecture', FA:'Façade', ST:'Structure', LA:'Landscape', MEP:'MEP (Mechanical / Electrical / Plumbing)', IN:'Interior', CM:'Construction Management', OWNER:'รอการตัดสินใจจากเจ้าของโครงการ' };
+  const DISC_LIST = discFilterCodes().map(k => ({ key: k, label: DISC_NAMES[k] ? `${k} — ${DISC_NAMES[k]}` : k }));
   const selected = state.reportOpts.disciplines;
   const trigger = selected.length === 0
     ? `<span class="ms-placeholder">All disciplines</span>`
@@ -2311,8 +2343,8 @@ function renderDiscMultiSelect() {
 
   // Quick presets
   const presets = [
-    { label:'MEP (AC+EE+SN+FP)', keys:['AC','EE','SN','FP'] },
-    { label:'Architecture (AR+IN+LA)', keys:['AR','IN','LA'] },
+    { label:'Architecture (AR+FA+IN+LA)', keys:['AR','FA','IN','LA'] },
+    { label:'MEP only', keys:['MEP'] },
     { label:'Structure only', keys:['ST'] }
   ];
 
@@ -2341,12 +2373,8 @@ function renderDiscMultiSelect() {
   </div>`;
 }
 function renderStatusMultiSelect() {
-  const STATUS_LIST = [
-    { key:'NEW', label:'NEW', cls:'b-new' },
-    { key:'ACTIVE', label:'ACTIVE', cls:'b-active' },
-    { key:'RESOLVED', label:'RESOLVED', cls:'b-resolved' },
-    { key:'Unknown', label:'Unknown', cls:'b-unknown' }
-  ];
+  const clsOf = (s) => ({ 'NEW':'b-new', 'ACTIVE':'b-active', 'ACTIVE DELAY':'b-delay', 'RESOLVED':'b-resolved', 'APPROVED':'b-approved' }[s] || 'b-unknown');
+  const STATUS_LIST = statusList().map(s => ({ key: s, label: statusLabel(s), cls: clsOf(s) }));
   const selected = state.reportOpts.statuses;
   const counts = tally(getIss(), 'status');
   const trigger = selected.length === 0
@@ -2430,7 +2458,7 @@ function openSaveReportTemplate() {
       <div class="modal-h"><h3>Save Report Template</h3><button class="so-close" onclick="closeModal()">${I.close}</button></div>
       <div class="modal-b">
         <div class="form-row"><label>Template Name *</label><input type="text" id="rt-name" placeholder="e.g. Weekly Owner Update" /></div>
-        <div style="font-size:11.5px;color:var(--muted)">บันทึก Sections ที่เลือก + ตัวกรอง Status/Discipline ปัจจุบัน — ใช้ได้กับทุกโปรเจกต์</div>
+        <div style="font-size:11.5px;color:var(--muted)">บันทึก Sections ที่เลือก + ตัวกรอง Status/Discipline + การเรียงลำดับ issue ปัจจุบัน — ใช้ได้กับทุกโปรเจกต์</div>
       </div>
       <div class="modal-f">
         <button class="btn btn-g" onclick="closeModal()">Cancel</button>
@@ -2448,6 +2476,8 @@ async function saveReportTemplate() {
     sections: [...state.reportOpts.sections],
     disciplines: [...state.reportOpts.disciplines],
     statuses: [...state.reportOpts.statuses],
+    sortBy: state.reportOpts.sortBy,
+    sortDir: state.reportOpts.sortDir,
     createdBy: state.user.name,
     createdAt: new Date().toISOString()
   };
@@ -2470,9 +2500,13 @@ function applyReportTemplate(id) {
   if (!id) return;
   const t = REPORT_TEMPLATES.find(x => x.id === id);
   if (!t) return;
-  state.reportOpts.sections = [...t.sections];
-  state.reportOpts.disciplines = [...t.disciplines];
-  state.reportOpts.statuses = [...t.statuses];
+  // Audit Trail was removed from reports; older templates may still list it.
+  state.reportOpts.sections = (t.sections || []).filter(k => k !== 'audit');
+  // Templates saved before the discipline clean-up may hold legacy codes (EE, AC, …).
+  state.reportOpts.disciplines = [...new Set((t.disciplines || []).map(mainDisc))];
+  state.reportOpts.statuses = [...(t.statuses || [])];
+  state.reportOpts.sortBy = t.sortBy || 'priority';
+  state.reportOpts.sortDir = t.sortDir || 'asc';
   toast(`✓ ใช้ template "${t.name}"`, '#2DBE60');
   render();
 }
@@ -2570,7 +2604,9 @@ async function extractZipToImgMap(arrayBuffer, imgMap) {
 }
 
 // Valid TEAM·CM discipline codes
-const VALID_DISC_CODES = ['EE','AC','AR','SN','FP','ST','LA','IN','OWNER','CM','MG','MEP','PMC','FACADE','CHK','SW'];
+// Every code the importer / repair logic may encounter, including legacy ones. What users
+// pick from in forms and filters comes from Master Data (MASTER.discipline), not from this list.
+const VALID_DISC_CODES = ['EE','AC','AR','SN','FP','ST','LA','IN','OWNER','CM','MG','MEP','PMC','FACADE','CHK','SW','FA'];
 
 // Extract discipline from TEAM·CM title pattern: {runNo}_{issNo}_{date}_{zone}_{disc}_...
 function extractDiscFromTitle(title) {
@@ -2677,7 +2713,7 @@ async function uploadImageQueue(uploadQueue, projIdx) {
         const it = (PROJECT_ISSUES[projIdx] || []).find(i => i.no === item.no);
         if (it) {
           it.imageUrl = url;
-          fbSaveIssue(projIdx, it).catch(() => {});
+          fbSaveIssue(projIdx, it).catch(saveFail('รูป issue'));
         }
         uploaded++;
       } catch (err) {
@@ -2772,8 +2808,8 @@ async function handleCsvFile(e) {
       // Discipline column: exact match only, exclude 'discription' typo
       disc:     header.findIndex(h => h === 'discipline' || h === 'disc' || h === 'disc.'),
       zone:     header.findIndex(h => h === 'zone'),
-      floor:    header.findIndex(h => h === 'floor'),
-      grid:     header.findIndex(h => h === 'grid'),
+      cause:    header.findIndex(h => h === 'cause' || h.includes('สาเหตุ')),
+      due:      header.findIndex(h => h === 'due' || h === 'due date' || h === 'due_date'),
       priority: header.findIndex(h => h.includes('priority')),
       status:   header.findIndex(h => h === 'status'),
       comment:  header.findIndex(h => h.includes('comment')),
@@ -2834,14 +2870,14 @@ async function handleCsvFile(e) {
         disc,
         discPrimary,
         zone:       get(row, col.zone,     'ZONE 1'),
-        floor:      get(row, col.floor,    '—'),
-        grid:       get(row, col.grid,     '—'),
+        cause:      get(row, col.cause,    ''),
+        dueDate:    (() => { const v = get(row, col.due, ''); return /^\d{4}-\d{2}-\d{2}/.test(v) ? v.slice(0, 10) : ''; })(),
         priority:   get(row, col.priority, 'Major'),
         status:     get(row, col.status,   'NEW'),
         comment:    get(row, col.comment,  COMMENTS[discPrimary] || ''),
         daysOpen:   parseInt(get(row, col.daysOpen, '0')) || 0,
         author:     get(row, col.author,   state.user.name),
-        assignee:   get(row, col.assignee, discPrimary + ' Team'),
+        assignee:   get(row, col.assignee, mainDisc(discPrimary)),
         createdAt:  (() => {
           const raw = get(row, col.created, '');
           const d = raw ? new Date(raw) : null;
@@ -2850,7 +2886,7 @@ async function handleCsvFile(e) {
       };
 
       if (existingIdx >= 0) {
-        getIss()[existingIdx] = Object.assign({}, getIss()[existingIdx], issue, { no: rawNo });
+        getIss()[existingIdx] = Object.assign({}, getIss()[existingIdx], issue, { no: rawNo, _base: undefined });
       } else {
         newIssues.push(issue);
       }
@@ -2873,6 +2909,7 @@ async function handleCsvFile(e) {
 
     // Prepend new issues (reverse so order matches CSV top-to-bottom)
     for (let i = newIssues.length - 1; i >= 0; i--) getIss().unshift(newIssues[i]);
+    prepareIssues(getIss(), state.projIdx);
 
     getAud().unshift({
       ts: '15/05/26 ' + new Date().toTimeString().slice(0,5),
@@ -2891,8 +2928,8 @@ async function handleCsvFile(e) {
       : 0;
     toast(`✓ Import ${importedCount} issues${localImgCount ? ` · จับคู่รูป ${localImgCount}` : ''}${imageQueue.length ? ` · โหลดเพิ่ม ${imageQueue.length} รูป…` : ''}`, '#2DBE60');
     // Sync all imported issues to RTDB in one batch
-    fbSeedIssues(state.projIdx, getIss()).catch(e => console.warn('Firebase seed:', e));
-    fbAddAudit(state.projIdx, getAud()[0]).catch(() => {});
+    fbSeedIssues(state.projIdx, getIss()).catch(saveFail('การนำเข้า issue'));
+    fbAddAudit(state.projIdx, getAud()[0]).catch(saveFail('audit log'));
     render();
 
     // Upload local images (from ZIP/files) to Cloud Storage for persistence
@@ -2912,7 +2949,7 @@ async function handleCsvFile(e) {
           setImg(item.no, url);
           // Store imageUrl in the issue doc
           const it = getIss().find(i => i.no === item.no);
-          if (it) { it.imageUrl = url; fbSaveIssue(state.projIdx, it).catch(() => {}); }
+          if (it) { it.imageUrl = url; fbSaveIssue(state.projIdx, it).catch(saveFail('รูป issue')); }
           imageCount++;
         } catch (err) {
           // Fallback: fetch as base64 and store locally only
@@ -2967,7 +3004,7 @@ function downloadFile(filename, content, mime = 'text/csv;charset=utf-8') {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 function issuesToCSV(rows) {
-  const header = ['NO.','Viewpoint Description','Discipline','Zone','Floor','Grid','Priority','Status','Comment','Author','Assignee','Days Open','Image URL'];
+  const header = ['NO.','Title','Discipline','Zone','Priority','Status','Cause','Assignee','Created','Due date','Comment','Author'];
   const csvEsc = (s) => {
     if (s == null) return '';
     s = String(s);
@@ -2976,8 +3013,8 @@ function issuesToCSV(rows) {
   };
   const lines = [header.join(',')];
   rows.forEach(it => {
-    // Export image as empty URL placeholder — user fills in URL before re-importing
-    lines.push([it.no, it.title, it.disc, it.zone, it.floor, it.grid, it.priority, it.status, it.comment, it.author, it.assignee, it.daysOpen, ''].map(csvEsc).join(','));
+    // Status is the stored one (not the auto-derived ACTIVE DELAY); due date is the issue's own override only.
+    lines.push([it.no, it.title, it.disc, it.zone, it.priority, it._base !== undefined ? it._base : it.status, it.cause || '', it.assignee, it.createdAt || '', it.dueDate || '', it.comment, it.author].map(csvEsc).join(','));
   });
   return lines.join('\n');
 }
@@ -2997,7 +3034,7 @@ function exportData() {
   // Export everything as JSON backup
   const backup = {
     project: PROJECTS[state.projIdx],
-    issues: getIss(),
+    issues: getIss().map(fbSerializeIssue),
     auditLog: getAud(),
     exportedAt: new Date().toISOString()
   };
@@ -3023,7 +3060,7 @@ let _issueFormDiscs = [];
 function disciplineChipPicker() {
   return `<div class="form-row"><label>Discipline * <span style="font-weight:400;color:var(--muted)">(เลือกได้มากกว่า 1)</span></label>
     <div id="issue-disc-picker" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:2px">
-      ${VALID_DISC_CODES.map(d => {
+      ${[...MASTER.discipline, ..._issueFormDiscs.filter(d => !MASTER.discipline.includes(d))].map(d => {
         const sel = _issueFormDiscs.includes(d);
         return `<span data-disc="${d}" onclick="toggleIssueFormDisc('${d}')" style="cursor:pointer;user-select:none;padding:5px 11px;border-radius:14px;font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace;border:1.5px solid ${sel?'var(--blue)':'var(--border)'};background:${sel?'var(--blue)':'transparent'};color:${sel?'#fff':'var(--muted)'}">${d}</span>`;
       }).join('')}
@@ -3041,6 +3078,16 @@ function toggleIssueFormDisc(code) {
   el.style.background = sel ? 'var(--blue)' : 'transparent';
   el.style.color = sel ? '#fff' : 'var(--muted)';
 }
+function causeAssigneeRows(it) {
+  return `<div class="form-row-grid">
+          <div class="form-row"><label>สาเหตุการเกิด Issue</label>
+            <select id="FID-cause"><option value="">— ไม่ระบุ —</option>${masterOptions(causeList(), it.cause || '')}</select>
+          </div>
+          <div class="form-row"><label>Assignee</label>
+            <select id="FID-assignee">${masterOptions(assigneeList(), it.assignee || assigneeList()[0])}</select>
+          </div>
+        </div>`;
+}
 function openNewIssue() {
   if (!requirePermission('create', 'สร้าง issue ใหม่')) return;
   _issueFormDiscs = [];
@@ -3048,26 +3095,23 @@ function openNewIssue() {
     <div class="modal">
       <div class="modal-h"><h3>New Issue</h3><button class="so-close" onclick="closeModal()">${I.close}</button></div>
       <div class="modal-b">
-        <div class="form-row"><label>Title *</label><input type="text" id="ni-title" placeholder="เช่น แนวท่อ EE ชนคานหลัก กริด A-2 ชั้น 5F" /></div>
+        <div class="form-row"><label>Title *</label><input type="text" id="ni-title" placeholder="เช่น แนวท่อ MEP ชนคานหลัก ชั้น 5" /></div>
         ${disciplineChipPicker()}
         <div class="form-row-grid">
           <div class="form-row"><label>Zone</label>
             <select id="ni-zone">${zoneOptions('')}</select>
           </div>
           <div class="form-row"><label>Priority</label>
-            <select id="ni-prio"><option>Critical</option><option selected>Major</option><option>Minor</option></select>
+            <select id="ni-prio">${masterOptions(priorityList(), priorityList().includes('Major') ? 'Major' : priorityList()[0])}</select>
           </div>
         </div>
         <div class="form-row-grid">
           <div class="form-row"><label>Status</label>
-            <select id="ni-status"><option>NEW</option><option>ACTIVE</option><option>RESOLVED</option></select>
+            <select id="ni-status">${masterOptions(statusList().filter(s => !isClosed(s) && s !== 'ACTIVE DELAY'), 'NEW', statusLabel)}</select>
           </div>
-          <div class="form-row"><label>Grid</label><input type="text" id="ni-grid" placeholder="A-2" /></div>
+          <div class="form-row"><label>Due date <span style="font-weight:400;color:var(--muted)">(ว่าง = Freeze date ของ Zone)</span></label><input type="date" id="ni-due" /></div>
         </div>
-        <div class="form-row"><label>Floor</label><input type="text" id="ni-floor" placeholder="5F" /></div>
-        <div class="form-row"><label>Assignee</label>
-          <select id="ni-assignee"><option>EE Team</option><option>AC Team</option><option>AR Team</option><option>SN Team</option><option>FP Team</option><option>ST Team</option><option>MEP Lead</option><option>Site Eng.</option><option>Owner</option></select>
-        </div>
+        ${causeAssigneeRows({}).replace(/FID-/g, 'ni-')}
         <div class="form-row"><label>Comment / Instruction</label><textarea id="ni-comment" placeholder="คำสั่ง / คำอธิบายเพิ่มเติม"></textarea></div>
       </div>
       <div class="modal-f">
@@ -3082,32 +3126,34 @@ function saveNewIssue() {
   if (!title) { toast('⚠️ ใส่ title ก่อน', '#d97706'); return; }
   if (_issueFormDiscs.length === 0) { toast('⚠️ เลือกอย่างน้อย 1 discipline', '#d97706'); return; }
   const disc = _issueFormDiscs.join(', ');
-  const newNo = String(Math.max(...getIss().map(i => +i.no)) + 1);
+  const newNo = String(Math.max(0, ...getIss().map(i => +i.no)) + 1);
   const it = {
     no: newNo,
     title,
     disc,
     discPrimary: _issueFormDiscs[0],
     zone: $('#ni-zone').value,
-    floor: $('#ni-floor').value || '—',
-    grid: $('#ni-grid').value || '—',
     priority: $('#ni-prio').value,
     status: $('#ni-status').value,
+    cause: $('#ni-cause').value,
+    dueDate: $('#ni-due').value || '',
     comment: $('#ni-comment').value || '',
     daysOpen: 0,
     author: state.user.name.split(' ').map(p=>p[0]+'.').join(''),
     assignee: $('#ni-assignee').value,
     createdAt: new Date().toISOString()
   };
+  it._base = it.status;
   getIss().unshift(it);
-  fbSaveIssue(state.projIdx, it).catch(e => console.warn('Firestore:', e));
+  applyAutoDelay([it], PROJECTS[state.projIdx]);
+  fbSaveIssue(state.projIdx, it).catch(saveFail('issue ใหม่'));
   getAud().unshift({
     ts: '15/05/26 ' + new Date().toTimeString().slice(0,5),
     issueNo: newNo, issueTitle: title,
     action: 'Issue Created', field:'', oldVal:'', newVal:'',
     user: state.user.name
   });
-  fbAddAudit(state.projIdx, getAud()[0]).catch(e => console.warn('Firestore audit:', e));
+  fbAddAudit(state.projIdx, getAud()[0]).catch(saveFail('audit log'));
   closeModal();
   toast(`✓ Created Issue #${newNo}`, '#2DBE60');
   state.notifications = [];
@@ -3118,6 +3164,7 @@ function openEditIssue(no) {
   const it = getIss().find(i => i.no === no);
   if (!it) return;
   _issueFormDiscs = discArray(it.disc);
+  const base = it._base !== undefined ? it._base : it.status;
   openModal(`
     <div class="modal">
       <div class="modal-h"><h3>Edit Issue #${it.no}</h3><button class="so-close" onclick="closeModal()">${I.close}</button></div>
@@ -3129,12 +3176,16 @@ function openEditIssue(no) {
             <select id="ed-zone">${zoneOptions(it.zone)}</select>
           </div>
           <div class="form-row"><label>Priority</label>
-            <select id="ed-prio">${PRIORITIES.map(p => `<option ${it.priority===p?'selected':''}>${p}</option>`).join('')}</select>
+            <select id="ed-prio">${masterOptions(priorityList(), it.priority)}</select>
           </div>
         </div>
-        <div class="form-row"><label>Status</label>
-          <select id="ed-status">${STATUSES.map(s => `<option ${it.status===s?'selected':''}>${s}</option>`).join('')}</select>
+        <div class="form-row-grid">
+          <div class="form-row"><label>Status</label>
+            <select id="ed-status">${masterOptions(statusList(), base, statusLabel)}</select>
+          </div>
+          <div class="form-row"><label>Due date <span style="font-weight:400;color:var(--muted)">(ว่าง = Freeze date ของ Zone)</span></label><input type="date" id="ed-due" value="${esc(it.dueDate || '')}" /></div>
         </div>
+        ${causeAssigneeRows(it).replace(/FID-/g, 'ed-')}
         <div class="form-row"><label>Comment</label><textarea id="ed-comment">${esc(it.comment)}</textarea></div>
       </div>
       <div class="modal-f">
@@ -3153,9 +3204,12 @@ function saveEditIssue(no) {
   it.disc = _issueFormDiscs.join(', ');
   it.zone = $('#ed-zone').value;
   it.priority = $('#ed-prio').value;
-  it.status = $('#ed-status').value;
+  it.cause = $('#ed-cause').value;
+  it.assignee = $('#ed-assignee').value;
+  it.dueDate = $('#ed-due').value || '';
   it.comment = $('#ed-comment').value;
-  fbSaveIssue(state.projIdx, it).catch(e => console.warn('Firestore:', e));
+  setIssueStatus(it, $('#ed-status').value);
+  fbSaveIssue(state.projIdx, it).catch(saveFail('issue #' + no));
   closeModal();
   toast(`✓ Updated Issue #${no}`, '#2DBE60');
   render();
@@ -3165,18 +3219,19 @@ function markResolved(no) {
   if (!requirePermission('edit', 'เปลี่ยนสถานะ')) return;
   const it = getIss().find(i => i.no === no);
   if (!it) return;
-  const wasResolved = it.status === 'RESOLVED';
-  const old = it.status;
-  it.status = wasResolved ? 'ACTIVE' : 'RESOLVED';
-  fbSaveIssue(state.projIdx, it).catch(e => console.warn('Firestore:', e));
+  const old = it._base !== undefined ? it._base : it.status;
+  const wasClosed = isClosed(old);
+  setIssueStatus(it, wasClosed ? 'ACTIVE' : 'RESOLVED');
+  if (wasClosed) delete it.resolvedAt; else it.resolvedAt = new Date().toISOString();
+  fbSaveIssue(state.projIdx, it).catch(saveFail('issue #' + no));
   getAud().unshift({
     ts: '15/05/26 ' + new Date().toTimeString().slice(0,5),
     issueNo: no, issueTitle: it.title,
-    action:'Status Change', field:'status', oldVal: old, newVal: it.status,
+    action:'Status Change', field:'status', oldVal: old, newVal: it._base,
     user: state.user.name
   });
-  fbAddAudit(state.projIdx, getAud()[0]).catch(e => console.warn('Firestore audit:', e));
-  toast(wasResolved ? `↻ Reopened Issue #${no}` : `✓ Resolved Issue #${no}`, '#2DBE60');
+  fbAddAudit(state.projIdx, getAud()[0]).catch(saveFail('audit log'));
+  toast(wasClosed ? `↻ Reopened Issue #${no}` : `✓ Resolved Issue #${no}`, '#2DBE60');
   state.notifications = [];
   render();
   openDetail(no);
@@ -3187,7 +3242,7 @@ function confirmDeleteIssue(no) {
   const idx = getIss().findIndex(i => i.no === no);
   if (idx >= 0) {
     const it = getIss().splice(idx,1)[0];
-    fbDeleteIssue(state.projIdx, no).catch(e => console.warn('Firestore:', e));
+    fbDeleteIssue(state.projIdx, no).catch(saveFail('การลบ issue'));
     fbDeleteImage(state.projIdx, no).catch(e => console.warn('Storage:', e));
     getAud().unshift({
       ts: '15/05/26 ' + new Date().toTimeString().slice(0,5),
@@ -3195,7 +3250,7 @@ function confirmDeleteIssue(no) {
       action:'Issue Deleted', field:'', oldVal:'', newVal:'',
       user: state.user.name
     });
-    fbAddAudit(state.projIdx, getAud()[0]).catch(e => console.warn('Firestore audit:', e));
+    fbAddAudit(state.projIdx, getAud()[0]).catch(saveFail('audit log'));
     delImg(no);
     persistImgs();
   }
@@ -3262,8 +3317,8 @@ function saveNewProject() {
     user: state.user.name
   });
   // Sync to Firebase
-  fbSaveProjects(PROJECTS).catch(e => console.warn('Firebase projects:', e));
-  fbAddAudit(state.projIdx, getAud()[0]).catch(() => {});
+  fbSaveProjects(PROJECTS).catch(saveFail('โปรเจกต์'));
+  fbAddAudit(state.projIdx, getAud()[0]).catch(saveFail('audit log'));
   closeModal();
   toast(`✓ Created project ${name}`, '#2DBE60');
   render();
@@ -3331,7 +3386,7 @@ function openEditProject(i) {
           </div>
         </div>
         <div style="background:var(--bg);border-radius:6px;padding:10px 12px;font-size:11.5px;color:var(--muted);display:flex;justify-content:space-between">
-          <span>${(PROJECT_ISSUES[i]||[]).length} issues · ${(PROJECT_ISSUES[i]||[]).filter(x=>x.status!=='RESOLVED').length} open</span>
+          <span>${(PROJECT_ISSUES[i]||[]).length} issues · ${(PROJECT_ISSUES[i]||[]).filter(x=>!isClosed(x._base !== undefined ? x._base : x.status)).length} open</span>
           <span>${(PROJECT_AUDIT[i]||[]).length} audit entries</span>
         </div>
       </div>
@@ -3403,10 +3458,10 @@ function saveEditProject(i) {
       action: 'Project Status Change', field:'status',
       oldVal: oldStatus, newVal: p.status, user: state.user.name
     });
-    fbAddAudit(state.projIdx, getAud()[0]).catch(() => {});
+    fbAddAudit(state.projIdx, getAud()[0]).catch(saveFail('audit log'));
   }
   // Sync to Firebase
-  fbSaveProjects(PROJECTS).catch(e => console.warn('Firebase projects:', e));
+  fbSaveProjects(PROJECTS).catch(saveFail('โปรเจกต์'));
   closeModal();
   toast(`✓ Updated ${p.name}`, '#2DBE60');
   render();
@@ -3443,9 +3498,9 @@ function confirmDeleteProject(i) {
   state.selected.clear();
   state.notifications = [];
   // Sync to Firebase: full projects array + remove RTDB nodes for deleted project
-  fbSaveProjects(PROJECTS).catch(e => console.warn('Firebase projects:', e));
-  fbDb.ref(`issues/${p.code.replace(/[.$#[\]/]/g, '_')}`).remove().catch(() => {});
-  fbDb.ref(`audit/${p.code.replace(/[.$#[\]/]/g, '_')}`).remove().catch(() => {});
+  fbSaveProjects(PROJECTS).catch(saveFail('โปรเจกต์'));
+  fbDb.ref(`issues/${p.code.replace(/[.$#[\]/]/g, '_')}`).remove().catch(saveFail('การลบข้อมูลโปรเจกต์'));
+  fbDb.ref(`audit/${p.code.replace(/[.$#[\]/]/g, '_')}`).remove().catch(saveFail('การลบข้อมูลโปรเจกต์'));
   toast(`🗑 Deleted ${p.name}`, '#dc2626');
   render();
 }
@@ -3503,8 +3558,8 @@ function duplicateProject(i) {
     action: 'Project Created', field:'', oldVal:'', newVal: dup.code, user: state.user.name
   }];
   // Sync to Firebase: projects + duplicated issues
-  fbSaveProjects(PROJECTS).catch(e => console.warn('Firebase projects:', e));
-  fbSeedIssues(newId, PROJECT_ISSUES[newId]).catch(e => console.warn('Firebase seed:', e));
+  fbSaveProjects(PROJECTS).catch(saveFail('โปรเจกต์'));
+  fbSeedIssues(newId, PROJECT_ISSUES[newId]).catch(saveFail('โปรเจกต์'));
   toast(`✓ Duplicated ${p.name}`, '#2DBE60');
   render();
 }
@@ -3565,7 +3620,7 @@ function saveInviteUser() {
     projectCode,
     lastActive: 'invited'
   });
-  fbSaveUsers(USERS).catch(e => console.warn('Firebase users:', e));
+  fbSaveUsers(USERS).catch(saveFail('ผู้ใช้'));
   closeModal();
   toast(`✓ Invitation sent to ${email}`, '#2DBE60');
   render();
@@ -3634,10 +3689,10 @@ function saveUserEdit(id) {
       action:'Role Changed', field:'role', oldVal: oldRole, newVal: role,
       user: state.user.name
     });
-    fbAddAudit(state.projIdx, getAud()[0]).catch(() => {});
+    fbAddAudit(state.projIdx, getAud()[0]).catch(saveFail('audit log'));
   }
-  fbSaveUsers(USERS).catch(e => console.warn('Firebase users:', e));
-  if (u.uid) fbSetRoleAccess(u.uid, role).catch(e => console.warn('Firebase role_access:', e));
+  fbSaveUsers(USERS).catch(saveFail('ผู้ใช้'));
+  if (u.uid) fbSetRoleAccess(u.uid, role).catch(saveFail('สิทธิ์ผู้ใช้'));
   closeModal();
   toast(`✓ อัปเดต ${name} → ${role}`, '#2DBE60');
   render();
@@ -3650,8 +3705,8 @@ function confirmDeleteUser(id) {
   if (!confirm(`ลบผู้ใช้ "${u.name}" ?\nการกระทำนี้ย้อนกลับไม่ได้`)) return;
   const idx = USERS.findIndex(x => x.id === id);
   if (idx >= 0) USERS.splice(idx, 1);
-  fbSaveUsers(USERS).catch(e => console.warn('Firebase users:', e));
-  if (u.uid) fbRemoveRoleAccess(u.uid).catch(e => console.warn('Firebase role_access:', e));
+  fbSaveUsers(USERS).catch(saveFail('ผู้ใช้'));
+  if (u.uid) fbRemoveRoleAccess(u.uid).catch(saveFail('สิทธิ์ผู้ใช้'));
   closeModal();
   toast(`🗑 ลบ ${u.name}`, '#dc2626');
   render();
@@ -3692,7 +3747,7 @@ function openAdvancedFilter() {
           <div class="form-row"><label>Discipline</label>
             <select id="af-disc">
               <option value="all">All</option>
-              ${VALID_DISC_CODES.map(d => `<option ${f.disc===d?'selected':''}>${d}</option>`).join('')}
+              ${discFilterCodes().map(d => `<option ${f.disc===d?'selected':''}>${esc(d)}</option>`).join('')}
             </select>
           </div>
           <div class="form-row"><label>Zone</label>
@@ -3706,27 +3761,17 @@ function openAdvancedFilter() {
           <div class="form-row"><label>Priority</label>
             <select id="af-prio">
               <option value="all">All</option>
-              <option ${f.prio==='Critical'?'selected':''}>Critical</option>
-              <option ${f.prio==='Major'?'selected':''}>Major</option>
-              <option ${f.prio==='Minor'?'selected':''}>Minor</option>
+              ${masterOptions(priorityList(), f.prio==='all' ? '' : f.prio)}
             </select>
           </div>
           <div class="form-row"><label>Status</label>
             <select id="af-status">
               <option value="all">All</option>
-              ${STATUSES.map(s => `<option ${f.status===s?'selected':''}>${s}</option>`).join('')}
+              ${masterOptions(statusList(), f.status==='all' ? '' : f.status, statusLabel)}
             </select>
           </div>
         </div>
         <div class="form-row"><label>Search keyword</label><input type="text" id="af-q" value="${esc(f.q)}" placeholder="ค้นหา NO / title / discipline" /></div>
-        <div class="form-row"><label>Age</label>
-          <select id="af-age">
-            <option value="all">ทั้งหมด</option>
-            <option>เปิดมาน้อยกว่า 7 วัน</option>
-            <option>เปิดมา 7-14 วัน</option>
-            <option>เปิดมาเกิน 14 วัน</option>
-          </select>
-        </div>
       </div>
       <div class="modal-f">
         <button class="btn btn-g" onclick="resetFilters()">Reset</button>
@@ -3776,20 +3821,18 @@ function buildReportCtx() {
   const t = all.length;
   const filtered = getReportIssues();
   const ft = filtered.length;
-  const resolved = filtered.filter(i => i.status==='RESOLVED').length;
-  const critical = filtered.filter(i => i.priority==='Critical').length;
-  const openIssues = filtered.filter(i => i.status !== 'RESOLVED');
-  const avgAge = openIssues.length ? Math.round(openIssues.reduce((s,i)=>s+i.daysOpen,0)/openIssues.length) : 0;
+  const resolved = filtered.filter(i => isClosed(i.status)).length;
+  const delayed = filtered.filter(i => i.status==='ACTIVE DELAY').length;
+  const openIssues = filtered.filter(i => !isClosed(i.status));
+  const avgAge = openIssues.length ? Math.round(openIssues.reduce((s,i)=>s+ageDays(i),0)/openIssues.length) : 0;
   const proj = PROJECTS[state.projIdx];
   const opts = state.reportOpts;
   const showSection = (k) => opts.sections.includes(k);
-  const stTally = tally(filtered, 'status');
-  const stItems = ['RESOLVED','ACTIVE','NEW','Unknown'].map(s => ({label:s, value:stTally[s]||0, color:STATUS_COLOR[s]}));
-  const prTally = tally(filtered, 'priority');
-  const prItems = ['Critical','Major','Minor'].map(p => ({label:p, value:prTally[p]||0, color:PRIO_COLOR[p]}));
+  const stItems = statusItems(tally(filtered, 'status'));
+  const prItems = priorityItems(tally(filtered, 'priority'));
   const dcTally = tallyDisc(filtered);
   const dcItems = Object.entries(dcTally).map(([d,v]) => ({label:d, value:v, color:DISC_COLOR[d]||'#94a3b8'})).sort((a,b)=>b.value-a.value);
-  return { proj, filtered, all, opts, showSection, stItems, prItems, dcItems, avgAge, resolved, critical, ft, t };
+  return { proj, filtered, all, opts, showSection, stItems, prItems, dcItems, avgAge, resolved, delayed, ft, t };
 }
 function generatePDF() {
   if (state.reportOpts.sections.length === 0) {
@@ -3856,6 +3899,8 @@ function buildPrintableHTML(ctx, title) {
   .b-active{background:#dbeafe !important;color:#2e5a87 !important}
   .b-resolved{background:#e6f7ec !important;color:#25a352 !important}
   .b-new{background:#f3e8ff !important;color:#7e22ce !important}
+  .b-delay{background:#ffe4e6 !important;color:#be123c !important}
+  .b-approved{background:#ccfbf1 !important;color:#0f766e !important}
   .b-critical{background:#fef2f2 !important;color:#dc2626 !important}
   .b-major{background:#fff7ed !important;color:#ea7f00 !important}
   .b-minor{background:#f1f5f9 !important;color:#475569 !important}
@@ -3885,7 +3930,6 @@ function buildPrintableHTML(ctx, title) {
     .rpt-doc{max-width:none;padding:0}
     .rpt-page{box-shadow:none !important;margin-bottom:6px !important;border-radius:0;page-break-after:auto;break-after:auto}
     .rpt-cover{page-break-after:always;break-after:page}
-    .rpt-audit{page-break-before:auto}
     .rpt-section-h{page-break-after:avoid;break-after:avoid}
     /* Ensure backgrounds & images print */
     *{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}

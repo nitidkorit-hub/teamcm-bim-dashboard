@@ -65,10 +65,24 @@ async function fbLoadIssues(projIdx) {
   return Object.values(data).sort((a, b) => parseInt(a.no) - parseInt(b.no));
 }
 
-/** Save (upsert) a single issue. Fire-and-forget safe. */
+/**
+ * What actually gets stored: the real status (`_base` — not the auto-derived ACTIVE DELAY
+ * the UI may be showing) and none of the client-only `_` fields or undefined values.
+ */
+function fbSerializeIssue(issue) {
+  const out = {};
+  Object.keys(issue).forEach(k => {
+    if (k[0] === '_' || issue[k] === undefined) return;
+    out[k] = issue[k];
+  });
+  if (issue._base !== undefined) out.status = issue._base;
+  return out;
+}
+
+/** Save (upsert) a single issue. Callers attach .catch(saveFail(...)) so a rejected write is visible. */
 async function fbSaveIssue(projIdx, issue) {
   const key = String(issue.no).replace(/[.$#[\]/]/g, '_');
-  return fbDb.ref(`issues/${fbPid(projIdx)}/${key}`).set(issue);
+  return fbDb.ref(`issues/${fbPid(projIdx)}/${key}`).set(fbSerializeIssue(issue));
 }
 
 /** Delete a single issue. Fire-and-forget safe. */
@@ -82,7 +96,7 @@ async function fbSeedIssues(projIdx, issues) {
   const data = {};
   issues.forEach(iss => {
     const key = String(iss.no).replace(/[.$#[\]/]/g, '_');
-    data[key] = iss;
+    data[key] = fbSerializeIssue(iss);
   });
   return fbDb.ref(`issues/${fbPid(projIdx)}`).set(data);
 }
@@ -142,9 +156,39 @@ async function fbSaveUsers(users) {
  * non-admin is rejected outright once it touches anyone else's row.
  */
 async function fbSaveOwnUser(userRecord) {
-  return Promise.all([
-    fbDb.ref('users/' + userRecord.id).set(userRecord),
-    fbSetRoleAccess(userRecord.uid, userRecord.role)
+  // The user record itself is the only write that must succeed.
+  const saved = fbDb.ref('users/' + userRecord.id).set(userRecord);
+  // Access mirrors, best effort: under the current rules a user may only *create* their own
+  // entry, with the least-privileged role. Anything beyond that (promotions, existing entries)
+  // is applied by an Admin session via fbReconcileAccess(), so a rejection here is expected.
+  if (userRecord.uid) {
+    const selfRole = userRecord.role === 'Client Reviewer' ? 'Client Reviewer' : 'Viewer';
+    fbDb.ref('role_access/' + userRecord.uid).set(selfRole).catch(() => {});
+    if (userRecord.projectCode) {
+      fbDb.ref('client_access/' + userRecord.uid).set(userRecord.projectCode).catch(() => {});
+    }
+  }
+  return saved;
+}
+
+/**
+ * Admin-only: pushes every known user's {uid: role} and {uid: projectCode} into the mirror
+ * nodes the Security Rules read. This is what promotes someone from the Viewer entry they
+ * created for themselves at first login to their real role, and what scopes a new client.
+ */
+async function fbReconcileAccess(users) {
+  const roles = {};
+  const clients = {};
+  users.forEach(u => {
+    if (!u.uid) return;
+    // 'Admin' is deliberately never mirrored from here — it can only be granted by an Admin
+    // editing the user (saveUserEdit), never inferred from a record anyone could have written.
+    if (u.role && u.role !== 'Admin') roles[u.uid] = u.role;
+    if (u.projectCode) clients[u.uid] = u.projectCode;
+  });
+  await Promise.all([
+    Object.keys(roles).length ? fbDb.ref('role_access').update(roles) : null,
+    fbDb.ref('client_access').set(clients)
   ]);
 }
 
@@ -255,6 +299,61 @@ async function fbSyncClientAccess(users) {
     if (u.uid && u.projectCode) data[u.uid] = u.projectCode;
   });
   return fbDb.ref('client_access').set(data);
+}
+
+// ─── Master data (dropdown options editable by Admin) ─────────────────
+async function fbLoadMaster() {
+  const snap = await fbDb.ref('master_data').get();
+  return snap.exists() ? snap.val() : null;
+}
+async function fbSaveMaster(master) {
+  return fbDb.ref('master_data').set(master);
+}
+function fbSubscribeMaster(callback) {
+  _unsubscribe('master_data');
+  const ref = fbDb.ref('master_data');
+  const fn = snap => callback(snap.val());
+  ref.on('value', fn);
+  _fbListeners.master_data = { ref, fn };
+}
+
+// ─── Connection state (drives the sidebar sync indicator) ─────────────
+function fbWatchConnection(callback) {
+  fbDb.ref('.info/connected').on('value', snap => callback(snap.val() === true));
+}
+
+// ─── Backup ───────────────────────────────────────────────────────────
+async function fbLoadBackupData(projects) {
+  const get = async (path) => { const s = await fbDb.ref(path).get(); return s.exists() ? s.val() : null; };
+  const out = {
+    exportedAt: new Date().toISOString(),
+    projects: await get('projects'),
+    users: await get('users'),
+    master_data: await get('master_data'),
+    library_docs: await get('library_docs'),
+    report_templates: await get('report_templates'),
+    issues: {},
+    audit: {}
+  };
+  for (const p of projects) {
+    const pid = String(p.code).replace(/[.$#[\]/]/g, '_');
+    out.issues[pid] = await get('issues/' + pid);
+    out.audit[pid] = await get('audit/' + pid);
+  }
+  return out;
+}
+
+// ─── Library full-text index (extracted in the browser from the PDF's text layer) ───
+// One RTDB node per document: { pages: ['line\nline…', …], emptyPages, indexedAt }.
+async function fbSaveLibraryIndex(docId, index) {
+  return fbDb.ref('library_index/' + docId).set(index);
+}
+async function fbLoadLibraryIndex(docId) {
+  const snap = await fbDb.ref('library_index/' + docId).get();
+  return snap.exists() ? snap.val() : null;
+}
+async function fbDeleteLibraryIndex(docId) {
+  return fbDb.ref('library_index/' + docId).remove();
 }
 
 // ─── Real-time listeners (auto-sync across devices) ──────────────────

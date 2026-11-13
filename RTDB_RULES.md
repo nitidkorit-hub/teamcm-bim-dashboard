@@ -1,5 +1,120 @@
 # Realtime Database Security Rules
 
+## Rev D — closes the remaining holes found in the system review
+
+Rev C is the rules currently published. Rev D adds what the review found, plus the two
+new nodes the app now uses (`master_data`, `library_index`). **Rev C stays below as the
+rollback**: if anything misbehaves after publishing Rev D, paste Rev C back and Publish.
+
+What changes compared with Rev C:
+
+| # | Hole in Rev C | Rev D |
+|---|---|---|
+| 1 | Any signed-in user could delete/overwrite their own `client_access` entry — an unscoped account sees every project, defeating the Client Portal | Only an Admin can write `client_access`. A user may only *create* their own entry once (the app does this at first login) or re-write the same value |
+| 2 | Any signed-in user could delete or overwrite the whole `users` list | Only an Admin can write the `users` node. A normal user can write only their own record (or an unclaimed one), and can never delete a record |
+| 3 | A first-time user could create their own record with any role (e.g. Admin) | A self-created record may only be `Viewer` or `Client Reviewer`; role changes stay Admin-only |
+| 4 | A Viewer / Client Reviewer could write or delete issues from devtools | `issues` writes need role `Admin`, `BIM Manager` or `Coordinator` (project scoping unchanged). Comments go to `audit`, so Client Reviewers can still comment |
+| 5 | Client Reviewers could delete shared report templates | `report_templates` writes need a known non-Client role |
+| + | `role_access` could be self-asserted as `BIM Manager`/`Coordinator` | A user may only create their own entry as `Viewer`/`Client Reviewer`; promotions are written by an Admin (Master Data → "Sync สิทธิ์") |
+| + | new nodes | `master_data` (Admin write), `library_index` (Admin/BIM Manager write) |
+
+```json
+{
+  "rules": {
+    "client_access": {
+      ".read": false,
+      ".write": "auth != null && root.child('role_access').child(auth.uid).val() === 'Admin'",
+      "$uid": {
+        ".write": "auth != null && auth.uid === $uid && (!data.exists() || newData.val() === data.val())"
+      }
+    },
+    "role_access": {
+      ".read": false,
+      ".write": "auth != null && root.child('role_access').child(auth.uid).val() === 'Admin'",
+      "$uid": {
+        ".write": "auth != null && auth.uid === $uid && !data.exists()",
+        ".validate": "root.child('role_access').child(auth.uid).val() === 'Admin' || newData.val() === 'Viewer' || newData.val() === 'Client Reviewer' || auth.token.email === 'nitid_s@teamcm.co.th'"
+      }
+    },
+    "projects": {
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('role_access').child(auth.uid).val() === 'Admin'"
+    },
+    "master_data": {
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('role_access').child(auth.uid).val() === 'Admin'"
+    },
+    "users": {
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('role_access').child(auth.uid).val() === 'Admin'",
+      "$id": {
+        ".write": "auth != null && newData.exists() && (!data.exists() || !data.child('uid').exists() || data.child('uid').val() === auth.uid)",
+        "role": {
+          ".validate": "root.child('role_access').child(auth.uid).val() === 'Admin' || (!data.exists() && (newData.val() === 'Viewer' || newData.val() === 'Client Reviewer')) || newData.val() === data.val()"
+        },
+        "projectCode": {
+          ".validate": "root.child('role_access').child(auth.uid).val() === 'Admin' || !data.exists() || newData.val() === data.val()"
+        }
+      }
+    },
+    "report_templates": {
+      ".read": "auth != null",
+      ".write": "auth != null && root.child('role_access').child(auth.uid).exists() && root.child('role_access').child(auth.uid).val() !== 'Client Reviewer'"
+    },
+    "library_docs": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('role_access').child(auth.uid).val() === 'Admin' || root.child('role_access').child(auth.uid).val() === 'BIM Manager')"
+    },
+    "library_index": {
+      ".read": "auth != null",
+      ".write": "auth != null && (root.child('role_access').child(auth.uid).val() === 'Admin' || root.child('role_access').child(auth.uid).val() === 'BIM Manager')"
+    },
+    "issues": {
+      "$pid": {
+        ".read":  "auth != null && (!root.child('client_access').child(auth.uid).exists() || root.child('client_access').child(auth.uid).val() === $pid)",
+        ".write": "auth != null && (!root.child('client_access').child(auth.uid).exists() || root.child('client_access').child(auth.uid).val() === $pid) && (root.child('role_access').child(auth.uid).val() === 'Admin' || root.child('role_access').child(auth.uid).val() === 'BIM Manager' || root.child('role_access').child(auth.uid).val() === 'Coordinator')"
+      }
+    },
+    "audit": {
+      "$pid": {
+        ".read":  "auth != null && (!root.child('client_access').child(auth.uid).exists() || root.child('client_access').child(auth.uid).val() === $pid)",
+        ".write": "auth != null && (!root.child('client_access').child(auth.uid).exists() || root.child('client_access').child(auth.uid).val() === $pid)"
+      }
+    }
+  }
+}
+```
+
+### Rollout (in this order)
+
+1. Deploy the app version that ships with this file (it already tolerates both Rev C and Rev D).
+2. Console → Realtime Database → **Rules**: paste the JSON above → test in the **Rules Playground**
+   (checklist below) → **Publish**.
+3. Reload the dashboard as `nitid_s@teamcm.co.th`, open **Master Data** → **Sync สิทธิ์ตอนนี้** once.
+   From then on, any Admin session keeps `role_access` / `client_access` in step with the Users page
+   automatically. (Until you click it, nothing is auto-promoted — by design, because before Rev D the
+   `users` list could be written by anyone.)
+4. Check with real accounts: an Admin can create/delete a project and edit users; a Coordinator can edit an
+   issue; a Viewer can *not* change an issue (a red "ไม่มีสิทธิ์เขียนข้อมูล" toast appears); a Client Reviewer
+   sees only their project and can still comment.
+
+**Rules Playground checklist** (simulate *Authenticated*, set the UID of the account being tested):
+- `nitid_s` (role_access = Admin) `set /projects/0` → allowed
+- Viewer `set /issues/P06428/1` → **denied**; Coordinator same path → allowed
+- Any user `set /users` (whole node) → **denied**; same user `set /users/<own id>` → allowed; `remove /users/<other id>` → **denied**
+- Client Reviewer `remove /client_access/<own uid>` → **denied**
+- New user `set /users/99` with `role: "Admin"` → **denied**; with `role: "Viewer"` → allowed
+
+**Known limits (unchanged by Rev D)**
+- *Domain restriction is client-side only.* Firebase Auth lets any Google account sign in; the app signs
+  non-`@teamcm.co.th` users out, but a hand-written client could still read data as "unscoped staff". The real
+  fix is a rule on the sign-in e-mail (`auth.token.email.endsWith('@teamcm.co.th')`, plus an Admin-maintained list for
+  invited externals / clients). It is **not** included because it locks out anyone whose provider doesn't put an
+  e-mail claim in the token. To check first: Console → Authentication → Users — every Microsoft user must show
+  an e-mail. If they all do, ask for the follow-up change.
+- Storage rules still can't see roles (see `STORAGE_RULES.md`); upload/delete limits live in the UI.
+- Coordinators can technically delete issues from devtools (rules can't tell create from edit by role here).
+
 ## Rev C — fixes a self-bootstrap lockout in Rev B
 
 **If you published Rev B and then found project/user create-or-delete
