@@ -117,7 +117,11 @@ function indexLibraryDocPrompt(docId) {
   input.click();
 }
 
-function _normText(s) { return String(s || '').toLowerCase().replace(/\s+/g, ''); }
+// Whitespace, NUL and Thai tone marks are ignored when matching. Several Thai PDFs hand pdf.js a NUL
+// (\u0000) in place of a stacked tone mark ("ชั้น" arrives as "ชั\u0000น"), so a plain match would
+// miss every word that has one; dropping the tone marks on both sides lets "ชั้น" still find it.
+const _IGNORED = /[\s\u0000่-๋]+/g;
+function _normText(s) { return String(s || '').toLowerCase().replace(_IGNORED, ''); }
 
 async function _loadLibraryIndex(doc) {
   if (_libIndexCache[doc.id]) return _libIndexCache[doc.id];
@@ -162,16 +166,18 @@ async function searchLibraryIndexes(query) {
 }
 
 function _highlight(line, query) {
-  const chars = [...String(query).replace(/\s+/g, '')];
-  if (!chars.length) return esc(line);
-  const re = new RegExp(chars.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('\\s*'), 'gi');
+  const clean = (t) => esc(String(t).replace(/\u0000/g, ''));
+  const chars = [...String(query).toLowerCase().replace(_IGNORED, '')];
+  if (!chars.length) return clean(line);
+  const gap = '[\\s\\u0000\\u0E48-\\u0E4B]*';
+  const re = new RegExp(chars.map(c => c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join(gap), 'gi');
   let out = '', last = 0, m;
   while ((m = re.exec(line))) {
-    out += esc(line.slice(last, m.index)) + '<mark>' + esc(m[0]) + '</mark>';
+    out += clean(line.slice(last, m.index)) + '<mark>' + clean(m[0]) + '</mark>';
     last = m.index + m[0].length;
     if (m[0].length === 0) re.lastIndex++;
   }
-  return out + esc(line.slice(last));
+  return out + clean(line.slice(last));
 }
 
 async function runLibrarySearch() {
