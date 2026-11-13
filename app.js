@@ -32,6 +32,16 @@ function getVisibleProjects() {
 }
 function getIss() { return PROJECT_ISSUES[state.projIdx] || PROJECT_ISSUES[0]; }
 function getAud() { return PROJECT_AUDIT[state.projIdx] || PROJECT_AUDIT[0]; }
+/** Distinct zones in the current project, natural-sorted (01_… before 02_…). Falls back to ZONE 1/2 for an empty project. */
+function zoneOptions(selected) {
+  const set = new Set(getIss().map(i => i.zone).filter(Boolean));
+  if (selected && selected !== 'all') set.add(selected);
+  if (set.size === 0) { set.add('ZONE 1'); set.add('ZONE 2'); }
+  return [...set]
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+    .map(z => `<option value="${esc(z)}" ${z === selected ? 'selected' : ''}>${esc(z)}</option>`)
+    .join('');
+}
 function imgKey(no) { return `p${state.projIdx}_${no}`; }
 function getImg(no) { return state.imgStore[imgKey(no)] || state.imgStore[no]; /* fallback for legacy keys */ }
 function setImg(no, data) { state.imgStore[imgKey(no)] = data; }
@@ -620,8 +630,7 @@ function renderIssues() {
       </select>
       <select class="fsel" onchange="setFilter('zone', this.value)">
         <option value="all" ${f.zone==='all'?'selected':''}>All Zones</option>
-        <option ${f.zone==='ZONE 1'?'selected':''}>ZONE 1</option>
-        <option ${f.zone==='ZONE 2'?'selected':''}>ZONE 2</option>
+        ${zoneOptions(f.zone)}
       </select>
       <div class="tb-search">
         ${I.search}<input type="text" placeholder="ค้นหา NO. / title / discipline…" value="${esc(f.q)}" oninput="setFilter('q', this.value)" />
@@ -3043,7 +3052,7 @@ function openNewIssue() {
         ${disciplineChipPicker()}
         <div class="form-row-grid">
           <div class="form-row"><label>Zone</label>
-            <select id="ni-zone"><option>ZONE 1</option><option>ZONE 2</option></select>
+            <select id="ni-zone">${zoneOptions('')}</select>
           </div>
           <div class="form-row"><label>Priority</label>
             <select id="ni-prio"><option>Critical</option><option selected>Major</option><option>Minor</option></select>
@@ -3117,7 +3126,7 @@ function openEditIssue(no) {
         ${disciplineChipPicker()}
         <div class="form-row-grid">
           <div class="form-row"><label>Zone</label>
-            <select id="ed-zone"><option ${it.zone==='ZONE 1'?'selected':''}>ZONE 1</option><option ${it.zone==='ZONE 2'?'selected':''}>ZONE 2</option></select>
+            <select id="ed-zone">${zoneOptions(it.zone)}</select>
           </div>
           <div class="form-row"><label>Priority</label>
             <select id="ed-prio">${PRIORITIES.map(p => `<option ${it.priority===p?'selected':''}>${p}</option>`).join('')}</select>
@@ -3689,8 +3698,7 @@ function openAdvancedFilter() {
           <div class="form-row"><label>Zone</label>
             <select id="af-zone">
               <option value="all">All</option>
-              <option ${f.zone==='ZONE 1'?'selected':''}>ZONE 1</option>
-              <option ${f.zone==='ZONE 2'?'selected':''}>ZONE 2</option>
+              ${zoneOptions(f.zone)}
             </select>
           </div>
         </div>
