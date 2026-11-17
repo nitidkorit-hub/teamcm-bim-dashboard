@@ -293,23 +293,3 @@ const PROJECT_AUDIT = { 0: AUDIT_LOG.slice(0, 5), 1: [] };
     });
   });
 });
-
-// 12-week trend for analytics
-const TREND_12W = (function(){
-  const out = [];
-  let totalCum = 0;
-  let resolvedCum = 0;
-  for (let w = 11; w >= 0; w--) {
-    const newIssues = 8 + Math.floor(rand()*14);
-    const resolved = 4 + Math.floor(rand()*12);
-    totalCum += newIssues;
-    resolvedCum += resolved;
-    out.push({
-      week: `W${52-w}`,
-      newIssues,
-      resolved,
-      backlog: Math.max(0, totalCum - resolvedCum)
-    });
-  }
-  return out;
-})();

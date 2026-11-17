@@ -769,8 +769,17 @@ function renderAnalytics() {
 
   const t = all.length;
   const resolved = all.filter(i => isClosed(i.status)).length;
-  const avgRes = 5.4; // days
-  const reopenRate = 4;
+  const weeks = state.anWeeks || 12;
+  const vs = velocityStats(all, weeks);
+  const weekly = buildWeekly(all, weeks);
+  // delta chip: good = true when the change is an improvement
+  const delta = (cur, prev, unit, lowerIsBetter, digits = 1) => {
+    if (cur === null || prev === null || cur === undefined || prev === undefined) return `<div class="vel-sub">ยังไม่มีข้อมูลช่วงก่อนหน้า</div>`;
+    const d = cur - prev;
+    if (Math.abs(d) < Math.pow(10, -digits) / 2) return `<div class="vel-sub">คงที่ เทียบ ${weeks} สัปดาห์ก่อน</div>`;
+    const good = lowerIsBetter ? d < 0 : d > 0;
+    return `<div class="vel-sub" style="color:${good ? '#2DBE60' : '#dc2626'}">${d > 0 ? '↑' : '↓'} ${Math.abs(d).toFixed(digits)} ${unit} เทียบ ${weeks} สัปดาห์ก่อน</div>`;
+  };
 
   return `<div class="page">
     <div class="page-head">
@@ -779,7 +788,7 @@ function renderAnalytics() {
         <div class="page-sub">ภาพรวมเชิงสถิติ · เลือก slice ใน chart เพื่อ filter ข้าม chart</div>
       </div>
       <div style="display:flex;gap:8px">
-        <select class="fsel" style="padding:7px 26px 7px 12px;font-size:13px"><option>เดือนนี้ (Apr 2026)</option><option>เดือนก่อน</option><option>12 สัปดาห์</option></select>
+        <select class="fsel" style="padding:7px 26px 7px 12px;font-size:13px" onchange="setAnWeeks(this.value)">${[4, 8, 12, 26].map(n => `<option value="${n}" ${n === weeks ? 'selected' : ''}>${n} สัปดาห์ล่าสุด</option>`).join('')}</select>
         <button class="btn btn-g" onclick="exportAnalytics()">${I.download}<span>Export Charts</span></button>
       </div>
     </div>
@@ -787,14 +796,14 @@ function renderAnalytics() {
     <!-- Velocity row -->
     <div class="card" style="margin-bottom:14px">
       <div class="card-h">
-        <div><h3>Resolution Velocity</h3><div class="ch-sub">วัดประสิทธิภาพการปิดงาน — เทียบสัปดาห์ก่อน</div></div>
+        <div><h3>Resolution Velocity</h3><div class="ch-sub">คำนวณจากวันที่สร้าง/ปิดของ issue จริง · ${weeks} สัปดาห์ล่าสุด เทียบ ${weeks} สัปดาห์ก่อนหน้า</div></div>
       </div>
       <div class="card-b">
         <div class="vel-grid">
-          <div class="vel-cell"><div class="vel-lbl">Throughput / wk</div><div class="vel-val">9.4 <span style="font-size:12px;color:var(--muted)">issues</span></div><div class="vel-sub" style="color:#2DBE60">↑ 18% vs 12-wk avg</div></div>
-          <div class="vel-cell"><div class="vel-lbl">Avg Resolution Time</div><div class="vel-val">${avgRes} <span style="font-size:12px;color:var(--muted)">days</span></div><div class="vel-sub" style="color:#2DBE60">↓ 1.2 day</div></div>
-          <div class="vel-cell"><div class="vel-lbl">Reopen Rate</div><div class="vel-val">${reopenRate}% </div><div class="vel-sub" style="color:#dc2626">↑ 1.5%</div></div>
-          <div class="vel-cell"><div class="vel-lbl">Forecast Clear</div><div class="vel-val">~9.5 <span style="font-size:12px;color:var(--muted)">wks</span></div><div class="vel-sub">หากความเร็วคงเดิม</div></div>
+          <div class="vel-cell"><div class="vel-lbl">Throughput / wk</div><div class="vel-val">${vs.throughput.toFixed(1)} <span style="font-size:12px;color:var(--muted)">issues</span></div>${delta(vs.throughput, vs.throughputPrev, 'issues/wk', false)}</div>
+          <div class="vel-cell"><div class="vel-lbl">Avg Resolution Time</div><div class="vel-val">${vs.avgRes === null ? '—' : vs.avgRes.toFixed(1)} <span style="font-size:12px;color:var(--muted)">days</span></div>${delta(vs.avgRes, vs.avgResPrev, 'วัน', true)}</div>
+          <div class="vel-cell"><div class="vel-lbl">Open Backlog</div><div class="vel-val">${vs.openNow} <span style="font-size:12px;color:var(--muted)">issues</span></div>${delta(vs.openNow, vs.openThen, 'issues', true, 0)}</div>
+          <div class="vel-cell"><div class="vel-lbl">Forecast Clear</div><div class="vel-val">${vs.forecastWeeks === null ? '—' : '~' + vs.forecastWeeks.toFixed(1)} <span style="font-size:12px;color:var(--muted)">wks</span></div><div class="vel-sub">${vs.forecastWeeks === null ? 'ยังไม่มี issue ที่ปิดในช่วงนี้' : 'หากปิดงานด้วยความเร็วเท่าเดิม'}</div></div>
         </div>
       </div>
     </div>
@@ -822,33 +831,39 @@ function renderAnalytics() {
     <!-- 12-week trend -->
     <div class="card">
       <div class="card-h">
-        <div><h3>12-week Trend</h3><div class="ch-sub">เปิด vs ปิด · เห็น backlog ค่อย ๆ ลดลง</div></div>
+        <div><h3>${weeks}-week Trend</h3><div class="ch-sub">issue ใหม่ vs ปิดต่อสัปดาห์ · และ backlog คงค้างปลายสัปดาห์</div></div>
       </div>
-      <div class="card-b">${trendSVG(TREND_12W)}</div>
+      <div class="card-b">${trendSVG(weekly)}</div>
     </div>
   </div>`;
 }
 
+function setAnWeeks(n) { state.anWeeks = +n || 12; render(); }
+
+// Weekly trend: New/Resolved use the left axis, Backlog (a much bigger number) its own right axis.
 function trendSVG(data) {
-  const w=900, h=240, padL=40, padR=20, padT=18, padB=30;
+  const w=900, h=240, padL=40, padR=44, padT=18, padB=30;
   const iw = w-padL-padR, ih = h-padT-padB;
-  const max = Math.max(...data.map(d => Math.max(d.newIssues, d.resolved, d.backlog/3)));
-  const stepX = iw / (data.length - 1);
+  const max = Math.max(1, ...data.map(d => Math.max(d.newIssues, d.resolved)));
+  const maxB = Math.max(1, ...data.map(d => d.backlog));
+  const stepX = data.length > 1 ? iw / (data.length - 1) : 0;
 
   const yTicks = [];
   for (let i = 0; i <= 4; i++) {
     const v = Math.round(max * (1 - i/4));
+    const vb = Math.round(maxB * (1 - i/4));
     const y = padT + (ih * i / 4);
     yTicks.push(`<line x1="${padL}" x2="${w-padR}" y1="${y}" y2="${y}" stroke="#eef2f8"/>
-                 <text x="${padL-8}" y="${y+3}" font-size="10" fill="#94a3b8" text-anchor="end" font-family="JetBrains Mono">${v}</text>`);
+                 <text x="${padL-8}" y="${y+3}" font-size="10" fill="#94a3b8" text-anchor="end" font-family="JetBrains Mono">${v}</text>
+                 <text x="${w-padR+8}" y="${y+3}" font-size="10" fill="#3A6EA5" text-anchor="start" font-family="JetBrains Mono">${vb}</text>`);
   }
 
   const newPts = data.map((d,i) => `${padL+i*stepX},${padT+ih-(d.newIssues/max)*ih}`).join(' ');
   const resPts = data.map((d,i) => `${padL+i*stepX},${padT+ih-(d.resolved/max)*ih}`).join(' ');
-  // backlog rescaled (/3 to fit)
-  const backPts = data.map((d,i) => `${padL+i*stepX},${padT+ih-(d.backlog/3/max)*ih}`).join(' ');
+  const backPts = data.map((d,i) => `${padL+i*stepX},${padT+ih-(d.backlog/maxB)*ih}`).join(' ');
 
-  let xLabels = data.map((d,i) => i%2===0 ?
+  const labelEvery = Math.ceil(data.length / 12);
+  let xLabels = data.map((d,i) => i % labelEvery === 0 ?
     `<text x="${padL+i*stepX}" y="${h-10}" font-size="10" fill="#94a3b8" text-anchor="middle" font-family="JetBrains Mono">${d.week}</text>` : ''
   ).join('');
 
@@ -864,7 +879,7 @@ function trendSVG(data) {
   <div class="burn-legend">
     <span><i style="background:#9333ea"></i> New Issues / week</span>
     <span><i style="background:#2DBE60"></i> Resolved / week</span>
-    <span><i style="background:#3A6EA5;height:2px;border-top:1px dashed #3A6EA5;background:transparent"></i> Backlog (÷3)</span>
+    <span><i style="background:#3A6EA5;height:2px;border-top:1px dashed #3A6EA5;background:transparent"></i> Backlog คงค้าง (แกนขวา)</span>
   </div>`;
 }
 

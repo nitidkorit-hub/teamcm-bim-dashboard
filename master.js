@@ -177,6 +177,58 @@ function buildProgress(issues) {
   return out;
 }
 
+// ===== Analytics (real data) =====
+/** Created day / closed day (day numbers) for every issue with a valid createdAt. */
+function _issueDays(issues) {
+  return issues.map(it => ({ c: _dayNum(new Date(it.createdAt)), x: _closedDay(it), valid: !isNaN(new Date(it.createdAt)) }))
+    .filter(r => r.valid);
+}
+/**
+ * The last `weeks` calendar weeks (7-day buckets ending today), oldest first.
+ * newIssues = created in the week, resolved = closed in the week, backlog = still open at the end of it.
+ */
+function buildWeekly(issues, weeks, today) {
+  const rows = _issueDays(issues);
+  const end0 = today === undefined ? _dayNum(new Date()) : today;
+  const out = [];
+  for (let k = weeks - 1; k >= 0; k--) {
+    const end = end0 - 7 * k, prev = end - 7;
+    const dt = new Date(end * 864e5 + new Date().getTimezoneOffset() * 60000);
+    out.push({
+      week: `${pad2(dt.getDate())}/${pad2(dt.getMonth() + 1)}`,
+      newIssues: rows.filter(r => r.c > prev && r.c <= end).length,
+      resolved: rows.filter(r => r.x !== null && r.x > prev && r.x <= end).length,
+      backlog: rows.filter(r => r.c <= end && !(r.x !== null && r.x <= end)).length
+    });
+  }
+  return out;
+}
+/**
+ * Velocity numbers for the last `weeks` weeks compared with the `weeks` before them.
+ * Reopen rate is not included — the app does not record reopen events.
+ */
+function velocityStats(issues, weeks, today) {
+  const rows = _issueDays(issues);
+  const end0 = today === undefined ? _dayNum(new Date()) : today;
+  const win = (from, to) => rows.filter(r => r.x !== null && r.x > from && r.x <= to);
+  const avgDays = (list) => list.length ? list.reduce((s, r) => s + Math.max(0, r.x - r.c), 0) / list.length : null;
+  const curStart = end0 - 7 * weeks, prevStart = end0 - 14 * weeks;
+  const cur = win(curStart, end0), prev = win(prevStart, curStart);
+  const openAt = (day) => rows.filter(r => r.c <= day && !(r.x !== null && r.x <= day)).length;
+  const throughput = cur.length / weeks;
+  const openNow = openAt(end0);
+  return {
+    throughput,
+    throughputPrev: prev.length / weeks,
+    closedInWindow: cur.length,
+    avgRes: avgDays(cur),
+    avgResPrev: avgDays(prev),
+    openNow,
+    openThen: openAt(curStart),
+    forecastWeeks: throughput > 0 ? openNow / throughput : null
+  };
+}
+
 // ===== Save-failure feedback =====
 // Writes used to be fire-and-forget with the error swallowed, so a rejected save looked
 // like it worked until the next refresh. Use as: promise.catch(saveFail('issue')).
