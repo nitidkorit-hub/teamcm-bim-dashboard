@@ -85,6 +85,34 @@ async function fbSaveIssue(projIdx, issue) {
   return fbDb.ref(`issues/${fbPid(projIdx)}/${key}`).set(fbSerializeIssue(issue));
 }
 
+/**
+ * Creates a new issue under the first free number at or above issue.no. Claimed with a
+ * transaction, so two people creating an issue at the same moment can't end up with the
+ * same number (the second one is bumped to the next free one). Resolves to the number used.
+ */
+async function fbCreateIssue(projIdx, issue, maxTries = 8) {
+  let no = parseInt(issue.no, 10);
+  for (let t = 0; t < maxTries; t++, no++) {
+    const ref = fbDb.ref(`issues/${fbPid(projIdx)}/${no}`);
+    const res = await ref.transaction(cur => (cur === null ? fbSerializeIssue({ ...issue, no: String(no) }) : undefined));
+    if (res.committed) return String(no);
+  }
+  throw new Error('สร้างเลข issue ใหม่ไม่สำเร็จ (มีคนสร้างพร้อมกันหลายรายการ) — ลองกดสร้างอีกครั้ง');
+}
+
+/**
+ * Writes only the given issues (merge by number) — unlike fbSeedIssues(), which replaces the
+ * whole project node and so wipes out anything someone else changed since this page loaded.
+ */
+async function fbUpsertIssues(projIdx, issues) {
+  const data = {};
+  issues.forEach(iss => {
+    data[String(iss.no).replace(/[.$#[\]/]/g, '_')] = fbSerializeIssue(iss);
+  });
+  if (!Object.keys(data).length) return;
+  return fbDb.ref(`issues/${fbPid(projIdx)}`).update(data);
+}
+
 /** Delete a single issue. Fire-and-forget safe. */
 async function fbDeleteIssue(projIdx, no) {
   const key = String(no).replace(/[.$#[\]/]/g, '_');

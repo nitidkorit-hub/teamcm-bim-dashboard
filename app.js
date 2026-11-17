@@ -1647,7 +1647,7 @@ function submitComment(no) {
   if (!text) { toast('⚠️ พิมพ์ข้อความก่อน', '#d97706'); return; }
   const it = getIss().find(i => i.no === no);
   const entry = {
-    ts: new Date().toLocaleDateString('en-GB').replace(/\//g,'/').slice(0,8) + ' ' + new Date().toTimeString().slice(0,5),
+    ts: auditTs(),
     issueNo: no, issueTitle: it ? it.title : '',
     action: 'Comment Added', field: 'comment', oldVal: '', newVal: text,
     user: state.user.name
@@ -2091,8 +2091,9 @@ async function loadProjectData(projIdx) {
     } else {
       // Auto-fix disciplines on load (repairs PT0001 data from old CSV import bug)
       let fixedCount = 0;
+      const fixedIssues = [];
       issues.forEach(it => {
-        if (autoFixIssueDisc(it)) fixedCount++;
+        if (autoFixIssueDisc(it)) { fixedCount++; fixedIssues.push(it); }
         if (it.imageUrl && it.imageUrl.startsWith('http')) {
           state.imgStore[`p${projIdx}_${it.no}`] = it.imageUrl;
         }
@@ -2101,7 +2102,8 @@ async function loadProjectData(projIdx) {
       PROJECT_ISSUES[projIdx] = issues;
       if (fixedCount > 0 && hasPermission('edit')) {
         toast(`🔧 ซ่อม disciplines ${fixedCount} issues — กำลังบันทึก…`, '#3A6EA5');
-        fbSeedIssues(projIdx, issues).then(() => {
+        // Only the repaired issues are written (a whole-node set would overwrite other people's edits)
+        fbUpsertIssues(projIdx, fixedIssues).then(() => {
           toast(`✓ Synced · ${issues.length} issues (fixed ${fixedCount})`, '#2DBE60');
         }).catch(e => console.warn('Firebase resave:', e));
       } else {
@@ -2912,7 +2914,7 @@ async function handleCsvFile(e) {
     prepareIssues(getIss(), state.projIdx);
 
     getAud().unshift({
-      ts: '15/05/26 ' + new Date().toTimeString().slice(0,5),
+      ts: auditTs(),
       issueNo: '', issueTitle: file.name,
       action: 'CSV Import', field: '', oldVal: '', newVal: importedCount + ' rows',
       user: state.user.name
@@ -2928,7 +2930,7 @@ async function handleCsvFile(e) {
       : 0;
     toast(`✓ Import ${importedCount} issues${localImgCount ? ` · จับคู่รูป ${localImgCount}` : ''}${imageQueue.length ? ` · โหลดเพิ่ม ${imageQueue.length} รูป…` : ''}`, '#2DBE60');
     // Sync all imported issues to RTDB in one batch
-    fbSeedIssues(state.projIdx, getIss()).catch(saveFail('การนำเข้า issue'));
+    fbUpsertIssues(state.projIdx, newIssues).catch(saveFail('การนำเข้า issue'));
     fbAddAudit(state.projIdx, getAud()[0]).catch(saveFail('audit log'));
     render();
 
@@ -3120,7 +3122,7 @@ function openNewIssue() {
       </div>
     </div>`);
 }
-function saveNewIssue() {
+async function saveNewIssue() {
   if (!requirePermission('create', 'สร้าง issue ใหม่')) return;
   const title = $('#ni-title').value.trim();
   if (!title) { toast('⚠️ ใส่ title ก่อน', '#d97706'); return; }
@@ -3143,19 +3145,34 @@ function saveNewIssue() {
     assignee: $('#ni-assignee').value,
     createdAt: new Date().toISOString()
   };
-  it._base = it.status;
-  getIss().unshift(it);
-  applyAutoDelay([it], PROJECTS[state.projIdx]);
-  fbSaveIssue(state.projIdx, it).catch(saveFail('issue ใหม่'));
+  // The number is claimed atomically in the database: if someone else created the same number a
+  // moment ago, the next free one is used instead of silently overwriting their issue.
+  if (saveNewIssue._busy) return;   // ignore a second click while the first save is in flight
+  saveNewIssue._busy = true;
+  let finalNo;
+  try {
+    finalNo = await fbCreateIssue(state.projIdx, it);
+  } catch (e) {
+    saveFail('issue ใหม่')(e);
+    return;
+  } finally {
+    saveNewIssue._busy = false;
+  }
+  it.no = finalNo;
+  if (!getIss().some(i => i.no === finalNo)) {   // the live listener may already have added it
+    it._base = it.status;
+    getIss().unshift(it);
+    applyAutoDelay([it], PROJECTS[state.projIdx]);
+  }
   getAud().unshift({
-    ts: '15/05/26 ' + new Date().toTimeString().slice(0,5),
-    issueNo: newNo, issueTitle: title,
+    ts: auditTs(),
+    issueNo: finalNo, issueTitle: title,
     action: 'Issue Created', field:'', oldVal:'', newVal:'',
     user: state.user.name
   });
   fbAddAudit(state.projIdx, getAud()[0]).catch(saveFail('audit log'));
   closeModal();
-  toast(`✓ Created Issue #${newNo}`, '#2DBE60');
+  toast(`✓ Created Issue #${finalNo}`, '#2DBE60');
   state.notifications = [];
   render();
 }
@@ -3225,7 +3242,7 @@ function markResolved(no) {
   if (wasClosed) delete it.resolvedAt; else it.resolvedAt = new Date().toISOString();
   fbSaveIssue(state.projIdx, it).catch(saveFail('issue #' + no));
   getAud().unshift({
-    ts: '15/05/26 ' + new Date().toTimeString().slice(0,5),
+    ts: auditTs(),
     issueNo: no, issueTitle: it.title,
     action:'Status Change', field:'status', oldVal: old, newVal: it._base,
     user: state.user.name
@@ -3245,7 +3262,7 @@ function confirmDeleteIssue(no) {
     fbDeleteIssue(state.projIdx, no).catch(saveFail('การลบ issue'));
     fbDeleteImage(state.projIdx, no).catch(e => console.warn('Storage:', e));
     getAud().unshift({
-      ts: '15/05/26 ' + new Date().toTimeString().slice(0,5),
+      ts: auditTs(),
       issueNo: no, issueTitle: it.title,
       action:'Issue Deleted', field:'', oldVal:'', newVal:'',
       user: state.user.name
@@ -3311,7 +3328,7 @@ function saveNewProject() {
   PROJECT_AUDIT[newId] = [];
   // Log to current project's audit
   getAud().unshift({
-    ts: '15/05/26 ' + new Date().toTimeString().slice(0,5),
+    ts: auditTs(),
     issueNo:'', issueTitle: `Project: ${name}`,
     action: 'Project Created', field:'', oldVal:'', newVal: code,
     user: state.user.name
@@ -3453,7 +3470,7 @@ function saveEditProject(i) {
   }
   if (oldStatus !== p.status) {
     getAud().unshift({
-      ts: '15/05/26 ' + new Date().toTimeString().slice(0,5),
+      ts: auditTs(),
       issueNo:'', issueTitle: `Project: ${p.name}`,
       action: 'Project Status Change', field:'status',
       oldVal: oldStatus, newVal: p.status, user: state.user.name
@@ -3553,7 +3570,7 @@ function duplicateProject(i) {
   PROJECTS.push(dup);
   PROJECT_ISSUES[newId] = (PROJECT_ISSUES[i] || []).map(it => ({...it}));
   PROJECT_AUDIT[newId] = [{
-    ts: '15/05/26 ' + new Date().toTimeString().slice(0,5),
+    ts: auditTs(),
     issueNo:'', issueTitle: `Duplicated from ${p.name}`,
     action: 'Project Created', field:'', oldVal:'', newVal: dup.code, user: state.user.name
   }];
@@ -3684,7 +3701,7 @@ function saveUserEdit(id) {
   // Audit log entry
   if (oldRole !== role) {
     getAud().unshift({
-      ts: new Date().toLocaleDateString('en-GB').replace(/\//g,'/').slice(0,8) + ' ' + new Date().toTimeString().slice(0,5),
+      ts: auditTs(),
       issueNo:'', issueTitle: u.name,
       action:'Role Changed', field:'role', oldVal: oldRole, newVal: role,
       user: state.user.name
@@ -3869,7 +3886,7 @@ function generatePDF() {
   };
   // Log to audit
   getAud().unshift({
-    ts: '15/05/26 ' + new Date().toTimeString().slice(0,5),
+    ts: auditTs(),
     issueNo:'', issueTitle: fileName,
     action: 'Report Generated', field:'', oldVal:'', newVal: `${ctx.filtered.length} issues`,
     user: state.user.name

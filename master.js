@@ -62,6 +62,11 @@ function discFilterCodes() {
 const pad2 = (n) => String(n).padStart(2, '0');
 function localISO(d) { return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
 function todayISO() { return localISO(new Date()); }
+/** Audit-log timestamp, "dd/mm/yy HH:MM" — the real current date and time. */
+function auditTs() {
+  const d = new Date();
+  return `${pad2(d.getDate())}/${pad2(d.getMonth() + 1)}/${String(d.getFullYear()).slice(2)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
 function isoToDMY(iso) {
   if (!iso) return '—';
   const [y, m, d] = String(iso).slice(0, 10).split('-');

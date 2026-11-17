@@ -77,6 +77,7 @@ What changes compared with Rev C:
     },
     "audit": {
       "$pid": {
+        ".indexOn": ["_ts"],
         ".read":  "auth != null && (!root.child('client_access').child(auth.uid).exists() || root.child('client_access').child(auth.uid).val() === $pid)",
         ".write": "auth != null && (!root.child('client_access').child(auth.uid).exists() || root.child('client_access').child(auth.uid).val() === $pid)"
       }
@@ -84,6 +85,8 @@ What changes compared with Rev C:
   }
 }
 ```
+
+> `.indexOn: ["_ts"]` on `audit/$pid` removes the console warning and makes the "latest 100 entries" query run on the server instead of downloading the whole log. Optional, harmless to publish.
 
 ### Rollout (in this order)
 
